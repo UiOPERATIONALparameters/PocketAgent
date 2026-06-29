@@ -7,6 +7,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.io.File
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -17,6 +18,10 @@ import javax.inject.Singleton
  * If the Termux bootstrap is installed, uses the bootstrap's bash (full Linux
  * userland: apt install, python, node, ffmpeg, git, etc.).
  * Otherwise, falls back to Android's built-in /system/bin/sh (basic POSIX).
+ *
+ * CRITICAL: When using the bootstrap, LD_LIBRARY_PATH MUST be set to the
+ * usr/lib directory. Without it, the dynamic linker can't find shared
+ * libraries and every binary fails with "Permission denied" (EACCES/error 13).
  */
 @Singleton
 class ShellExecutor @Inject constructor(
@@ -48,7 +53,7 @@ class ShellExecutor @Inject constructor(
 
         // Choose shell: bootstrap bash if available, else /system/bin/sh
         val shell = if (useBootstrap) {
-            listOf(bootstrapPath!!, "--login", "-c", command)
+            listOf(bootstrapPath!!, "-c", command)
         } else {
             listOf("/system/bin/sh", "-c", command)
         }
@@ -66,11 +71,24 @@ class ShellExecutor @Inject constructor(
         env["PWD"] = workspace.homeDir.absolutePath
 
         if (useBootstrap) {
-            // Set PATH to include bootstrap bin first
+            val usrDir = bootstrapInstaller.usrDir
+            val libDir = File(usrDir, "lib")
+
+            // CRITICAL: Set PATH to include bootstrap bin first
             env["PATH"] = bootstrapInstaller.getPath()
-            // Tell the bootstrap where its root is
-            env["PREFIX"] = bootstrapInstaller.usrDir.absolutePath
+
+            // CRITICAL: Set LD_LIBRARY_PATH so the dynamic linker finds shared libs
+            // Without this, every binary fails with "Permission denied" (error 13)
+            env["LD_LIBRARY_PATH"] = libDir.absolutePath
+
+            // Set PREFIX — Termux packages use this to find their root
+            env["PREFIX"] = usrDir.absolutePath
+
+            // Set TMPDIR to a writable location inside the workspace
             env["TMPDIR"] = workspace.tmpDir.absolutePath
+
+            // Set COLORTERM for color support
+            env["COLORTERM"] = "truecolor"
         } else {
             env["PATH"] = "/system/bin:/system/xbin:${env["PATH"] ?: ""}"
         }

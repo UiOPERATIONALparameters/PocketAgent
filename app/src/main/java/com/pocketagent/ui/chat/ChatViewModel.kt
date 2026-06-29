@@ -540,6 +540,72 @@ class ChatViewModel @Inject constructor(
         _state.update { it.copy(error = null) }
     }
 
+    /**
+     * Export the current conversation as markdown.
+     */
+    suspend fun exportConversation(): String? {
+        val convId = _state.value.conversationId ?: return null
+        val messages = withContext(Dispatchers.IO) {
+            messageDao.getForConversation(convId)
+        }
+        val conv = conversationDao.getById(convId) ?: return null
+        val sb = StringBuilder()
+        sb.appendLine("# ${conv.title}")
+        sb.appendLine()
+        sb.appendLine("_Exported from PocketAgent on ${java.text.SimpleDateFormat("MMM d, yyyy 'at' HH:mm", java.util.Locale.getDefault()).format(java.util.Date())}_")
+        sb.appendLine()
+        sb.appendLine("---")
+        sb.appendLine()
+        for (msg in messages) {
+            when (msg.role) {
+                "user" -> {
+                    sb.appendLine("## You")
+                    sb.appendLine()
+                    sb.appendLine(msg.content ?: "")
+                    sb.appendLine()
+                }
+                "assistant" -> {
+                    sb.appendLine("## PocketAgent")
+                    sb.appendLine()
+                    if (!msg.reasoning.isNullOrEmpty()) {
+                        sb.appendLine("<details><summary>Reasoning</summary>")
+                        sb.appendLine()
+                        sb.appendLine("```")
+                        sb.appendLine(msg.reasoning)
+                        sb.appendLine("```")
+                        sb.appendLine()
+                        sb.appendLine("</details>")
+                        sb.appendLine()
+                    }
+                    sb.appendLine(msg.content ?: "")
+                    sb.appendLine()
+                }
+                "tool" -> {
+                    val toolName = msg.toolName ?: "tool"
+                    sb.appendLine("<details><summary>Tool: $toolName</summary>")
+                    sb.appendLine()
+                    sb.appendLine("```")
+                    sb.appendLine(msg.content ?: "")
+                    sb.appendLine("```")
+                    sb.appendLine()
+                    sb.appendLine("</details>")
+                    sb.appendLine()
+                }
+            }
+        }
+        return sb.toString()
+    }
+
+    /**
+     * Export conversation with callback (for UI thread).
+     */
+    fun exportConversation(onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            val result = exportConversation()
+            onResult(result)
+        }
+    }
+
     private suspend fun MessageEntity.toUiWithToolRuns(): ChatMessageUi {
         val runs = toolRunDao.getForMessage(id)
         val firstRun = runs.firstOrNull()

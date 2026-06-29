@@ -17,9 +17,6 @@ import javax.inject.Singleton
  * Downloads and extracts the Termux bootstrap, giving the AI a full Linux
  * userland (bash, python, node, git, ffmpeg, apt, etc.) inside the app's
  * private storage.
- *
- * The bootstrap URL is fetched dynamically from the GitHub API to always
- * get the latest working release.
  */
 @Singleton
 class BootstrapInstaller @Inject constructor(
@@ -27,20 +24,17 @@ class BootstrapInstaller @Inject constructor(
     private val workspace: Workspace
 ) {
     companion object {
-        // GitHub API endpoint to find the latest bootstrap release
         private const val GITHUB_API_URL = "https://api.github.com/repos/termux/termux-packages/releases"
-
-        // Fallback URLs (tried if API fails)
         private val FALLBACK_URLS = listOf(
             "https://github.com/termux/termux-packages/releases/latest/download/bootstrap-aarch64.zip",
             "https://packages.termux.dev/bootstrap-aarch64.zip"
         )
-
         const val MARKER_FILE = ".bootstrap_installed"
     }
 
     val usrDir: File = File(context.filesDir, "usr")
     val binDir: File = File(usrDir, "bin")
+    val libDir: File = File(usrDir, "lib")
     val bashPath: File get() = File(binDir, "bash")
 
     fun isInstalled(): Boolean {
@@ -52,9 +46,37 @@ class BootstrapInstaller @Inject constructor(
     }
 
     /**
-     * Download and install the bootstrap.
-     * @param onProgress callback with (bytesDownloaded, totalBytes) — totalBytes may be -1 if unknown
+     * Get diagnostic info about the bootstrap installation.
+     * Used by the AI to debug issues.
      */
+    fun getDiagnosticInfo(): String {
+        return buildString {
+            appendLine("Bootstrap installed: ${isInstalled()}")
+            appendLine("usrDir exists: ${usrDir.exists()}")
+            appendLine("usrDir path: ${usrDir.absolutePath}")
+            appendLine("binDir exists: ${binDir.exists()}")
+            appendLine("bashPath exists: ${bashPath.exists()}")
+            if (bashPath.exists()) {
+                appendLine("bashPath executable: ${bashPath.canExecute()}")
+                appendLine("bashPath size: ${bashPath.length()} bytes")
+            }
+            appendLine("libDir exists: ${libDir.exists()}")
+            if (libDir.exists()) {
+                val soFiles = libDir.listFiles { f -> f.name.endsWith(".so") }
+                appendLine("libDir .so files: ${soFiles?.size ?: 0}")
+            }
+            if (binDir.exists()) {
+                val bins = binDir.listFiles()
+                appendLine("binDir file count: ${bins?.size ?: 0}")
+                bins?.take(10)?.forEach { f ->
+                    appendLine("  ${f.name} (exec=${f.canExecute()}, size=${f.length()})")
+                }
+            }
+            appendLine("LD_LIBRARY_PATH should be: ${libDir.absolutePath}")
+            appendLine("PATH should be: ${binDir.absolutePath}:/system/bin:/system/xbin")
+        }
+    }
+
     suspend fun install(onProgress: (Long, Long) -> Unit): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val zipFile = File(context.cacheDir, "bootstrap-aarch64.zip")
@@ -85,18 +107,40 @@ class BootstrapInstaller @Inject constructor(
                 return@withContext Result.failure(IOException("Failed to download bootstrap from all URLs. Last error: $lastError"))
             }
 
+            // Clean up any previous installation
+            if (usrDir.exists()) {
+                usrDir.deleteRecursively()
+            }
+            usrDir.mkdirs()
+
             // Extract
             onProgress(-1, -1)
             extractZip(zipFile, usrDir)
 
-            // Set executable permissions
-            binDir.listFiles()?.forEach { file ->
-                if (file.isFile) {
-                    file.setExecutable(true, true)
+            // CRITICAL: Set executable permissions on ALL files in bin/
+            // Some Android versions don't preserve permissions from zip
+            if (binDir.exists()) {
+                binDir.listFiles()?.forEach { file ->
+                    if (file.isFile) {
+                        file.setExecutable(true, true)
+                    }
                 }
             }
-            File(usrDir, "lib").listFiles()?.forEach { file ->
-                if (file.isFile && file.name.endsWith(".so")) {
+
+            // Also set +x on .so files (some are loaded as executables)
+            if (libDir.exists()) {
+                libDir.listFiles()?.forEach { file ->
+                    if (file.isFile) {
+                        file.setExecutable(true, true)
+                        file.setReadable(true, true)
+                    }
+                }
+            }
+
+            // Set read permissions on everything
+            usrDir.walkTopDown().forEach { file ->
+                file.setReadable(true, true)
+                if (file.isDirectory) {
                     file.setExecutable(true, true)
                 }
             }
@@ -112,15 +156,20 @@ class BootstrapInstaller @Inject constructor(
             // Clean up zip
             zipFile.delete()
 
+            // Verify installation
+            if (!bashPath.exists()) {
+                return@withContext Result.failure(IOException("Bootstrap extracted but bash not found at ${bashPath.absolutePath}"))
+            }
+            if (!bashPath.canExecute()) {
+                bashPath.setExecutable(true, true)
+            }
+
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
-    /**
-     * Query the GitHub API to find the latest bootstrap-aarch64.zip URL.
-     */
     private fun findLatestBootstrapUrl(): String? {
         return try {
             val client = OkHttpClient.Builder()
@@ -141,7 +190,6 @@ class BootstrapInstaller @Inject constructor(
                 val releases = org.json.JSONArray(body)
                 if (releases.length() == 0) return null
 
-                // Look through releases for one with bootstrap-aarch64.zip asset
                 for (i in 0 until releases.length()) {
                     val release = releases.optJSONObject(i) ?: continue
                     val assets = release.optJSONArray("assets") ?: continue
@@ -166,7 +214,7 @@ class BootstrapInstaller @Inject constructor(
             connection.connectTimeout = 30_000
             connection.readTimeout = 300_000
             connection.instanceFollowRedirects = true
-            connection.setRequestProperty("User-Agent", "PocketAgent/0.5")
+            connection.setRequestProperty("User-Agent", "PocketAgent/0.6")
 
             if (connection.responseCode != java.net.HttpURLConnection.HTTP_OK) {
                 connection.disconnect()
@@ -219,7 +267,7 @@ class BootstrapInstaller @Inject constructor(
                     FileOutputStream(outFile).use { fos ->
                         zis.copyTo(fos)
                     }
-                    if (entryPath.contains("/bin/")) {
+                    if (entryPath.contains("/bin/") || entryPath.startsWith("bin/")) {
                         outFile.setExecutable(true, true)
                     }
                 }

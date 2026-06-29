@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
@@ -128,7 +129,24 @@ fun ChatScreen(
                     onNewConversation()
                 },
                 onOpenSettings = onOpenSettings,
-                onOpenFiles = onOpenFiles
+                onOpenFiles = onOpenFiles,
+                onExport = {
+                    viewModel.exportConversation { markdown ->
+                        if (markdown != null) {
+                            // Share via Android share sheet
+                            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                type = "text/markdown"
+                                putExtra(android.content.Intent.EXTRA_SUBJECT, state.title)
+                                putExtra(android.content.Intent.EXTRA_TEXT, markdown)
+                            }
+                            val chooser = android.content.Intent.createChooser(intent, "Export Conversation")
+                            chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            context.startActivity(chooser)
+                        } else {
+                            Toast.makeText(context, "No conversation to export", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
             )
 
             // Messages list
@@ -261,7 +279,8 @@ private fun ChatTopBar(
     onMenuClick: () -> Unit,
     onNewChat: () -> Unit,
     onOpenSettings: () -> Unit,
-    onOpenFiles: () -> Unit
+    onOpenFiles: () -> Unit,
+    onExport: () -> Unit = {}
 ) {
     Row(
         modifier = Modifier
@@ -285,6 +304,13 @@ private fun ChatTopBar(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
+        IconButton(onClick = onExport) {
+            Icon(
+                imageVector = Icons.Filled.IosShare,
+                contentDescription = "Export",
+                tint = extendedColors().textPrimary
+            )
+        }
         IconButton(onClick = onOpenFiles) {
             Icon(
                 imageVector = Icons.Filled.Folder,

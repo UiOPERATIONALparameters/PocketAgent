@@ -138,16 +138,39 @@ class OpenAICompatibleProvider(
 
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                 val body = try { response?.body?.string() } catch (_: Exception) { null }
-                val msg = buildString {
-                    append("Stream failed: ")
-                    append(t?.message ?: t?.let { it::class.simpleName } ?: "unknown error")
-                    if (response != null) {
-                        append(" (HTTP ${response.code}")
-                        if (body != null) append(": $body")
-                        append(")")
+
+                // Check if this is a transient stream reset (HTTP 200 = server accepted request
+                // but stream was interrupted). These are common on mobile networks and should
+                // NOT be treated as fatal errors.
+                val isTransientReset = response?.code == 200 &&
+                    (t?.message?.contains("reset") == true ||
+                     t?.message?.contains("CANCEL") == true ||
+                     t?.message?.contains("closed") == true ||
+                     t == null)
+
+                if (isTransientReset) {
+                    // Stream was interrupted but the request was valid.
+                    // Treat as a clean finish — the caller can retry if needed.
+                    if (!isClosedForSend) {
+                        trySend(StreamDelta.Finish(reason = "stream_reset"))
                     }
+                    channel.close()
+                } else {
+                    val msg = buildString {
+                        append("Stream failed: ")
+                        append(t?.message ?: t?.let { it::class.simpleName } ?: "unknown error")
+                        if (response != null) {
+                            append(" (HTTP ${response.code}")
+                            if (body != null) {
+                                // Truncate long error bodies
+                                val truncatedBody = if (body.length > 500) body.substring(0, 500) + "…" else body
+                                append(": $truncatedBody")
+                            }
+                            append(")")
+                        }
+                    }
+                    channel.close(LlmException(msg, t))
                 }
-                channel.close(LlmException(msg, t))
             }
         })
 

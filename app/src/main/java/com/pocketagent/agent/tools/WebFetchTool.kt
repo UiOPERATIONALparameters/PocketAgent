@@ -97,8 +97,19 @@ class WebFetchTool @Inject constructor(
                 val display = "${resp.code} ${resp.message} (${respBody.length} bytes) <- $method $url"
                 return ToolResult.Success(output, display)
             }
+        } catch (e: java.net.MalformedURLException) {
+            return ToolResult.Error("Invalid URL: ${e.message ?: "malformed URL"}. Make sure to include https://")
+        } catch (e: java.net.UnknownHostException) {
+            return ToolResult.Error("Unknown host: ${e.message ?: "DNS resolution failed"}. Check the URL and network connection.")
+        } catch (e: java.net.SocketTimeoutException) {
+            return ToolResult.Error("Request timed out: ${e.message ?: "connection timeout"}")
+        } catch (e: javax.net.ssl.SSLException) {
+            return ToolResult.Error("SSL error: ${e.message ?: "SSL handshake failed"}")
+        } catch (e: java.io.IOException) {
+            return ToolResult.Error("Network error: ${e.message ?: e::class.simpleName ?: "IO error"}")
         } catch (e: Exception) {
-            return ToolResult.Error("Request failed: ${e.message}")
+            val msg = e.message ?: e::class.simpleName ?: "unknown error"
+            return ToolResult.Error("Request failed: $msg (${e::class.simpleName ?: "Exception"})")
         }
     }
 
