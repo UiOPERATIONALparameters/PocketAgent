@@ -120,6 +120,23 @@ class ShellExecutor @Inject constructor(
 
             // Set COLORTERM for color support
             env["COLORTERM"] = "truecolor"
+
+            // SSL certificate paths for curl/wget/git
+            val certDir = File(bootstrapInstaller.usrDir, "etc/ssl/certs")
+            val caBundle = File(certDir, "ca-certificates.crt")
+            if (caBundle.exists()) {
+                env["CURL_CA_BUNDLE"] = caBundle.absolutePath
+                env["SSL_CERT_FILE"] = caBundle.absolutePath
+                env["SSL_CERT_DIR"] = certDir.absolutePath
+                env["REQUESTS_CA_BUNDLE"] = caBundle.absolutePath
+                env["GIT_SSL_CAINFO"] = caBundle.absolutePath
+            }
+
+            // APT and dpkg config
+            val aptConf = File(bootstrapInstaller.usrDir, "etc/apt/apt.conf")
+            if (aptConf.exists()) env["APT_CONFIG"] = aptConf.absolutePath
+            val dpkgDir = File(bootstrapInstaller.usrDir, "var/lib/dpkg")
+            if (dpkgDir.exists()) env["DPKG_ADMINDIR"] = dpkgDir.absolutePath
         } else {
             env["PATH"] = "/system/bin:/system/xbin:${env["PATH"] ?: ""}"
         }

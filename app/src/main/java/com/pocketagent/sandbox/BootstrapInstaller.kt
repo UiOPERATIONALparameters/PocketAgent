@@ -163,14 +163,20 @@ class BootstrapInstaller @Inject constructor(
             // CRITICAL: Patch hardcoded Termux paths in all binaries and scripts.
             patchTermuxPaths(usrDir)
 
-            // CRITICAL: Create .so symlinks. The Termux bootstrap ships libraries
-            // with full version numbers (e.g. libreadline.so.8.0) but the dynamic
-            // linker looks for the short name (libreadline.so.8). Without these
-            // symlinks, bash and other binaries fail to start.
+            // CRITICAL: Patch ALL shebangs in bin/ scripts.
+            patchShebangs()
+
+            // CRITICAL: Create .so symlinks.
             createSoSymlinks(libDir)
 
             // CRITICAL: Create symlink bridge for termux-exec path translation
             createSymlinkBridge()
+
+            // CRITICAL: Set up SSL certificates so curl/wget can do HTTPS
+            setupSslCerts()
+
+            // CRITICAL: Fix apt/dpkg configuration to use our prefix
+            fixAptConfig()
 
             // Create .profile and improve .bashrc
             createShellConfigs()
@@ -363,6 +369,100 @@ class BootstrapInstaller @Inject constructor(
      *
      * Without these symlinks, binaries fail with "library not found".
      */
+    private fun patchShebangs() {
+        val oldPrefix = "/data/data/com.termux/files/usr"
+        val newPrefix = usrDir.absolutePath
+        if (!binDir.exists()) return
+        binDir.listFiles()?.forEach { file ->
+            if (!file.isFile) return@forEach
+            try {
+                val firstLine = file.bufferedReader().use { it.readLine() } ?: return@forEach
+                if (firstLine.startsWith("#!") && firstLine.contains(oldPrefix)) {
+                    val patched = firstLine.replace(oldPrefix, newPrefix)
+                    val rest = file.readText().substringAfter("\n", "")
+                    file.writeText("$patched\n$rest")
+                    file.setExecutable(true, true)
+                }
+            } catch (_: Exception) {}
+        }
+        listOf("etc", "share").forEach { subDir ->
+            val dir = File(usrDir, subDir)
+            if (!dir.exists()) return@forEach
+            dir.walkTopDown().forEach { file ->
+                if (!file.isFile) return@forEach
+                try {
+                    val firstLine = file.bufferedReader().use { it.readLine() } ?: return@forEach
+                    if (firstLine.startsWith("#!") && firstLine.contains(oldPrefix)) {
+                        val patched = firstLine.replace(oldPrefix, newPrefix)
+                        val rest = file.readText().substringAfter("\n", "")
+                        file.writeText("$patched\n$rest")
+                        file.setExecutable(true, true)
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    private fun setupSslCerts() {
+        val etcDir = File(usrDir, "etc")
+        if (!etcDir.exists()) etcDir.mkdirs()
+        val certDir = File(etcDir, "ssl/certs")
+        if (!certDir.exists()) certDir.mkdirs()
+        val systemCerts = File("/system/etc/security/cacerts")
+        if (systemCerts.exists()) {
+            val caBundle = File(certDir, "ca-certificates.crt")
+            try {
+                val sb = StringBuilder()
+                systemCerts.listFiles()?.forEach { certFile ->
+                    if (certFile.isFile && certFile.name.endsWith(".0")) {
+                        try { sb.append(certFile.readText()); sb.append("\n") } catch (_: Exception) {}
+                    }
+                }
+                caBundle.writeText(sb.toString())
+            } catch (_: Exception) {}
+        }
+        val profileDir = File(etcDir, "profile.d")
+        if (!profileDir.exists()) profileDir.mkdirs()
+        val sslProfile = File(profileDir, "pocketagent-ssl.sh")
+        sslProfile.writeText("""
+            export CURL_CA_BUNDLE="${'$'}{PREFIX}/etc/ssl/certs/ca-certificates.crt"
+            export SSL_CERT_FILE="${'$'}{PREFIX}/etc/ssl/certs/ca-certificates.crt"
+            export SSL_CERT_DIR="${'$'}{PREFIX}/etc/ssl/certs"
+            export REQUESTS_CA_BUNDLE="${'$'}{PREFIX}/etc/ssl/certs/ca-certificates.crt"
+            export GIT_SSL_CAINFO="${'$'}{PREFIX}/etc/ssl/certs/ca-certificates.crt"
+        """.trimIndent())
+        sslProfile.setExecutable(true, true)
+        sslProfile.setReadable(true, true)
+    }
+
+    private fun fixAptConfig() {
+        val aptDir = File(usrDir, "etc/apt")
+        if (!aptDir.exists()) aptDir.mkdirs()
+        val aptConf = File(aptDir, "apt.conf")
+        aptConf.writeText("""
+            Dir "${usrDir.absolutePath}";
+            Dir::State "${usrDir.absolutePath}/var/lib/apt";
+            Dir::State::lists "${usrDir.absolutePath}/var/lib/apt/lists";
+            Dir::Cache "${usrDir.absolutePath}/var/cache/apt";
+            Dir::Cache::archives "${usrDir.absolutePath}/var/cache/apt/archives";
+            Dir::Etc "${usrDir.absolutePath}/etc/apt";
+            Dir::Bin::dpkg "${usrDir.absolutePath}/bin/dpkg";
+            DPkg::Options { "--root=${usrDir.absolutePath}"; "--force-not-root"; "--force-confdef"; "--force-confold"; };
+            APT::Architecture "arm64";
+        """.trimIndent())
+        val sourcesList = File(aptDir, "sources.list")
+        sourcesList.writeText("deb https://packages.termux.dev/apt/termux-main/ stable main\n")
+        listOf("var/lib/apt/lists/partial", "var/cache/apt/archives/partial",
+               "var/lib/dpkg", "var/lib/dpkg/info", "var/lib/dpkg/updates",
+               "var/lib/dpkg/triggers", "var/lib/dpkg/parts").forEach { path ->
+            File(usrDir, path).mkdirs()
+        }
+        val dpkgStatus = File(usrDir, "var/lib/dpkg/status")
+        if (!dpkgStatus.exists()) dpkgStatus.writeText("")
+        val dpkgAvailable = File(usrDir, "var/lib/dpkg/available")
+        if (!dpkgAvailable.exists()) dpkgAvailable.writeText("")
+    }
+
     private fun createSoSymlinks(libDir: File) {
         if (!libDir.exists()) return
 
