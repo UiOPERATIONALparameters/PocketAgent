@@ -17,12 +17,19 @@ import javax.inject.Singleton
  *     └── .bashrc     (init script)
  *
  * All agent file operations are confined to this directory via PathGuard.
+ *
+ * CRITICAL: homeDir is canonicalized because Android's /data/data/ is a
+ * symlink to /data/user/0/. If we don't canonicalize, PathGuard's
+ * startsWith check fails because the paths are on different roots.
  */
 @Singleton
 class Workspace @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
-    val homeDir: File = File(context.filesDir, "workspace").apply { if (!exists()) mkdirs() }
+    val homeDir: File = File(context.filesDir, "workspace").apply {
+        if (!exists()) mkdirs()
+    }.canonicalFile
+
     val projectsDir: File = File(homeDir, "projects").apply { if (!exists()) mkdirs() }
     val tmpDir: File = File(homeDir, "tmp").apply { if (!exists()) mkdirs() }
     val downloadsDir: File = File(homeDir, "downloads").apply { if (!exists()) mkdirs() }

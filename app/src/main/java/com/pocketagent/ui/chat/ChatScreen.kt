@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
@@ -130,7 +131,11 @@ fun ChatScreen(
 
             // Messages list
             if (state.messages.isEmpty() && state.streamingContent.isEmpty() && !state.isAgentRunning) {
-                EmptyChatState()
+                // CRITICAL: Use weight(1f) so EmptyChatState doesn't consume all
+                // vertical space and push the composer off-screen
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    EmptyChatState()
+                }
             } else {
                 LazyColumn(
                     state = listState,
@@ -229,6 +234,7 @@ fun ChatScreen(
                     onNewConversation()
                 },
                 onDeleteConversation = viewModel::deleteConversation,
+                onRenameConversation = viewModel::renameConversation,
                 onClose = viewModel::closeSidebar
             )
         }
@@ -652,9 +658,13 @@ private fun SidebarOverlay(
     onConversationClick: (String) -> Unit,
     onNewConversation: () -> Unit,
     onDeleteConversation: (String) -> Unit,
+    onRenameConversation: (String, String) -> Unit,
     onClose: () -> Unit
 ) {
     val ext = extendedColors()
+    var renamingId by remember { mutableStateOf<String?>(null) }
+    var renameText by remember { mutableStateOf("") }
+
     Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f))) {
         // Click-outside catcher
         Box(
@@ -678,12 +688,11 @@ private fun SidebarOverlay(
                 )
                 // New chat button
                 Surface(
+                    onClick = onNewConversation,
                     color = ext.surface,
                     shape = RoundedCornerShape(12.dp),
                     border = androidx.compose.foundation.BorderStroke(1.dp, ext.divider),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(onClick = onNewConversation)
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
                         modifier = Modifier.padding(12.dp),
@@ -727,7 +736,25 @@ private fun SidebarOverlay(
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f)
                             )
-                            // Delete button — wrapped in Box to consume clicks
+                            // Rename button
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .clickable(onClick = {
+                                        renamingId = conv.id
+                                        renameText = conv.title
+                                    }),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Edit,
+                                    contentDescription = "Rename",
+                                    tint = ext.textTertiary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            // Delete button
                             Box(
                                 modifier = Modifier
                                     .size(28.dp)
@@ -747,6 +774,50 @@ private fun SidebarOverlay(
                 }
             }
         }
+    }
+
+    // Rename dialog
+    if (renamingId != null) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { renamingId = null },
+            title = { Text("Rename conversation", style = PocketType.Title, color = ext.textPrimary) },
+            text = {
+                androidx.compose.material3.OutlinedTextField(
+                    value = renameText,
+                    onValueChange = { renameText = it },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = ext.surface,
+                        unfocusedContainerColor = ext.surface,
+                        focusedBorderColor = ext.accent,
+                        unfocusedBorderColor = ext.divider,
+                        cursorColor = ext.accent
+                    )
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        val id = renamingId
+                        if (id != null && renameText.isNotBlank()) {
+                            onRenameConversation(id, renameText.trim())
+                        }
+                        renamingId = null
+                    }
+                ) {
+                    Text("Save", color = ext.accent)
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { renamingId = null }) {
+                    Text("Cancel", color = ext.textSecondary)
+                }
+            },
+            containerColor = ext.surface,
+            titleContentColor = ext.textPrimary
+        )
     }
 }
 

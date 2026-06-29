@@ -1,5 +1,6 @@
 package com.pocketagent.ui.settings
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -42,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -59,6 +61,7 @@ fun SettingsScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val ext = extendedColors()
+    val context = LocalContext.current
     var showKey by remember { mutableStateOf(false) }
     var search by remember { mutableStateOf("") }
 
@@ -136,11 +139,12 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Surface(
+                            onClick = {
+                                viewModel.saveAndTest()
+                            },
                             color = ext.accent,
                             shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable(onClick = viewModel::saveAndTest)
+                            modifier = Modifier.weight(1f)
                         ) {
                             Row(
                                 modifier = Modifier.padding(14.dp),
@@ -163,7 +167,7 @@ fun SettingsScreen(
                     }
                     val testResult = state.testResult
                     if (testResult != null) {
-                        val isError = testResult.startsWith("Failed")
+                        val isError = testResult.startsWith("Failed") || testResult.startsWith("Couldn't")
                         Surface(
                             color = if (isError) ext.error.copy(alpha = 0.1f) else ext.success.copy(alpha = 0.1f),
                             shape = RoundedCornerShape(8.dp)
@@ -221,15 +225,17 @@ fun SettingsScreen(
                             items(filtered, key = { it.id }) { model ->
                                 val isSelected = state.activeModelId == model.id
                                 Surface(
+                                    onClick = {
+                                        viewModel.selectModel(model.id)
+                                        Toast.makeText(context, "Model selected: ${model.displayName ?: model.id}", Toast.LENGTH_SHORT).show()
+                                    },
                                     color = if (isSelected) ext.accentMuted else ext.surface,
                                     shape = RoundedCornerShape(10.dp),
                                     border = androidx.compose.foundation.BorderStroke(
                                         1.dp,
                                         if (isSelected) ext.accent else ext.divider
                                     ),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable(onClick = { viewModel.selectModel(model.id) })
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Row(
                                         modifier = Modifier.padding(10.dp),
@@ -247,6 +253,14 @@ fun SettingsScreen(
                                                 color = ext.textSecondary,
                                                 modifier = Modifier.alpha(0.7f)
                                             )
+                                            if (model.supportsVision) {
+                                                Text(
+                                                    text = "vision",
+                                                    style = PocketType.LabelSmall,
+                                                    color = ext.accent,
+                                                    modifier = Modifier.padding(top = 2.dp)
+                                                )
+                                            }
                                         }
                                         if (isSelected) {
                                             Icon(Icons.Filled.Check, contentDescription = null, tint = ext.accent)
@@ -287,22 +301,13 @@ fun SettingsScreen(
                         )
                     )
                     Spacer(Modifier.height(4.dp))
-                    Surface(
-                        color = ext.accent.copy(alpha = 0.1f),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier
-                            .clickable(onClick = viewModel::saveSystemPrompt)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(Icons.Filled.Check, contentDescription = null, tint = ext.accent, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.size(6.dp))
-                            Text("Save System Prompt", style = PocketType.LabelSmall, color = ext.accent)
+                    SaveButton(
+                        text = "Save System Prompt",
+                        onClick = {
+                            viewModel.saveSystemPrompt()
+                            Toast.makeText(context, "System prompt saved", Toast.LENGTH_SHORT).show()
                         }
-                    }
+                    )
 
                     Spacer(Modifier.height(12.dp))
 
@@ -326,22 +331,13 @@ fun SettingsScreen(
                         )
                     )
                     Spacer(Modifier.height(4.dp))
-                    Surface(
-                        color = ext.accent.copy(alpha = 0.1f),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier
-                            .clickable(onClick = viewModel::saveBashTimeout)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(Icons.Filled.Check, contentDescription = null, tint = ext.accent, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.size(6.dp))
-                            Text("Save Timeout", style = PocketType.LabelSmall, color = ext.accent)
+                    SaveButton(
+                        text = "Save Timeout",
+                        onClick = {
+                            viewModel.saveBashTimeout()
+                            Toast.makeText(context, "Timeout saved: ${state.bashTimeoutSec}s", Toast.LENGTH_SHORT).show()
                         }
-                    }
+                    )
 
                     Spacer(Modifier.height(12.dp))
 
@@ -365,22 +361,13 @@ fun SettingsScreen(
                         )
                     )
                     Spacer(Modifier.height(4.dp))
-                    Surface(
-                        color = ext.accent.copy(alpha = 0.1f),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier
-                            .clickable(onClick = viewModel::saveWorkspaceQuota)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(Icons.Filled.Check, contentDescription = null, tint = ext.accent, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.size(6.dp))
-                            Text("Save Quota", style = PocketType.LabelSmall, color = ext.accent)
+                    SaveButton(
+                        text = "Save Quota",
+                        onClick = {
+                            viewModel.saveWorkspaceQuota()
+                            Toast.makeText(context, "Quota saved: ${state.workspaceQuotaMb}MB", Toast.LENGTH_SHORT).show()
                         }
-                    }
+                    )
                 }
 
                 // About section
@@ -399,11 +386,13 @@ fun SettingsScreen(
                         )
                     }
                     Surface(
+                        onClick = {
+                            viewModel.clearAllKeys()
+                            Toast.makeText(context, "All keys cleared", Toast.LENGTH_SHORT).show()
+                        },
                         color = ext.error.copy(alpha = 0.08f),
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable(onClick = viewModel::clearAllKeys)
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
                             "Clear All Keys & Reset",
@@ -416,6 +405,26 @@ fun SettingsScreen(
 
                 Spacer(Modifier.height(32.dp))
             }
+        }
+    }
+}
+
+@Composable
+private fun SaveButton(text: String, onClick: () -> Unit) {
+    val ext = extendedColors()
+    Surface(
+        onClick = onClick,
+        color = ext.accent.copy(alpha = 0.1f),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Icon(Icons.Filled.Check, contentDescription = null, tint = ext.accent, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.size(6.dp))
+            Text(text, style = PocketType.LabelSmall, color = ext.accent)
         }
     }
 }

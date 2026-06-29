@@ -16,7 +16,7 @@ import javax.inject.Inject
 
 data class FileEntry(
     val name: String,
-    val path: String,
+    val path: String,          // relative to workspace home
     val isDirectory: Boolean,
     val size: Long,
     val modified: Long,
@@ -24,7 +24,7 @@ data class FileEntry(
 )
 
 data class FileBrowserUiState(
-    val currentPath: String = ".",
+    val currentPath: String = ".",       // relative to workspace home
     val entries: List<FileEntry> = emptyList(),
     val previewContent: String? = null,
     val previewName: String? = null,
@@ -50,6 +50,10 @@ class FileBrowserViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Navigate to a path relative to workspace home.
+     * If the path is a file, preview it instead.
+     */
     fun navigateTo(relativePath: String) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
@@ -60,7 +64,6 @@ class FileBrowserViewModel @Inject constructor(
                         return@withContext
                     }
                     if (!dir.isDirectory) {
-                        // If it's a file, preview it
                         previewFile(relativePath)
                         return@withContext
                     }
@@ -68,6 +71,8 @@ class FileBrowserViewModel @Inject constructor(
                         ?.filter { it.name != "." && it.name != ".." }
                         ?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
                         ?.map { f ->
+                            // Compute path relative to HOME (not current dir)
+                            // so navigateTo always works with the stored path
                             val rel = workspace.homeDir.toPath().relativize(f.toPath()).toString()
                             FileEntry(
                                 name = f.name,
@@ -103,7 +108,6 @@ class FileBrowserViewModel @Inject constructor(
                         _state.update { it.copy(error = "Cannot preview: $relativePath") }
                         return@withContext
                     }
-                    // Only preview text files under 256KB
                     val size = file.length()
                     if (size > 256_000) {
                         _state.update {
@@ -165,8 +169,9 @@ class FileBrowserViewModel @Inject constructor(
     fun navigateUp() {
         val current = _state.value.currentPath
         if (current == "." || current.isEmpty()) return
-        val parent = File(current).parent ?: "."
-        navigateTo(if (parent.isEmpty()) "." else parent)
+        // Go to parent path relative to home
+        val parent = current.substringBeforeLast('/', ".")
+        navigateTo(if (parent.isEmpty() || parent == current) "." else parent)
     }
 
     fun clearError() {
