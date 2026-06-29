@@ -6,7 +6,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -139,7 +138,7 @@ class BootstrapInstaller @Inject constructor(
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return null
                 val body = response.body?.string() ?: return null
-                val releases = JSONObject(body)
+                val releases = org.json.JSONArray(body)
                 if (releases.length() == 0) return null
 
                 // Look through releases for one with bootstrap-aarch64.zip asset
