@@ -90,6 +90,11 @@ fun OnboardingScreen(
                 onSelectModel = onSelectModel,
                 onFinish = onFinish
             )
+            OnboardingState.OnboardingStep.SAVING -> ModelStep(
+                state = state,
+                onSelectModel = onSelectModel,
+                onFinish = onFinish
+            )
             OnboardingState.OnboardingStep.DONE -> {
                 LaunchedEffect(Unit) { onFinish() }
             }
