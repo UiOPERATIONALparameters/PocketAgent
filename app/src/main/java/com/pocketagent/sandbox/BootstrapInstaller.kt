@@ -161,13 +161,15 @@ class BootstrapInstaller @Inject constructor(
             }
 
             // CRITICAL: Patch hardcoded Termux paths in all binaries and scripts.
-            // The Termux bootstrap has /data/data/com.termux/files/usr/ compiled in.
-            // We replace it with our actual prefix so apt, pkg, and all tools work.
             patchTermuxPaths(usrDir)
 
-            // CRITICAL: Create symlink bridge so /data/data/com.termux/files/usr
-            // resolves to our prefix. This catches any paths we missed in patching
-            // (e.g. in compiled .so libraries that we can't sed).
+            // CRITICAL: Create .so symlinks. The Termux bootstrap ships libraries
+            // with full version numbers (e.g. libreadline.so.8.0) but the dynamic
+            // linker looks for the short name (libreadline.so.8). Without these
+            // symlinks, bash and other binaries fail to start.
+            createSoSymlinks(libDir)
+
+            // CRITICAL: Create symlink bridge for termux-exec path translation
             createSymlinkBridge()
 
             // Create .profile and improve .bashrc
@@ -351,42 +353,101 @@ class BootstrapInstaller @Inject constructor(
     }
 
     /**
-     * CRITICAL: Create a symlink bridge so /data/data/com.termux/files/usr
-     * resolves to our actual prefix.
+     * CRITICAL: Create .so symlinks for all shared libraries.
      *
-     * We CAN'T write to /data/data/com.termux/ (it's outside our app), but we
-     * CAN create the path structure inside our own app-private storage and
-     * use proot or environment variables to redirect.
+     * The Termux bootstrap ships libraries with full version numbers:
+     *   libreadline.so.8.0
+     * But the dynamic linker looks for:
+     *   libreadline.so.8  (SONAME)
+     *   libreadline.so    (development link)
      *
-     * The approach: Set TERMUX_PREFIX in the environment, which some tools
-     * check. Also create a wrapper script that sets up the path translation.
+     * Without these symlinks, binaries fail with "library not found".
+     */
+    private fun createSoSymlinks(libDir: File) {
+        if (!libDir.exists()) return
+
+        libDir.listFiles { f -> f.name.endsWith(".so") || f.name.contains(".so.") }?.forEach { file ->
+            val name = file.name
+            // Skip if it's already a symlink
+            if (java.nio.file.Files.isSymbolicLink(file.toPath())) return@forEach
+
+            // Parse version from name: libfoo.so.8.0 -> libfoo.so.8, libfoo.so
+            val soIdx = name.indexOf(".so")
+            if (soIdx < 0) return@forEach
+
+            val baseName = name.substring(0, soIdx + 3)  // libfoo.so
+            val versionPart = name.substring(soIdx + 3)  // .8.0 or empty
+
+            if (versionPart.isNotEmpty()) {
+                // Create libfoo.so.8 symlink (first version number)
+                val parts = versionPart.split(".").filter { it.isNotEmpty() }
+                if (parts.isNotEmpty()) {
+                    val soname = "$baseName.${parts[0]}"  // libfoo.so.8
+                    val sonameFile = File(libDir, soname)
+                    if (!sonameFile.exists()) {
+                        try {
+                            java.nio.file.Files.createSymbolicLink(sonameFile.toPath(), file.toPath())
+                        } catch (_: Exception) {
+                            // Fallback: copy if symlink fails (some filesystems don't support symlinks)
+                            try { sonameFile.copyFrom(file) } catch (_: Exception) {}
+                        }
+                    }
+                }
+            }
+
+            // Create libfoo.so symlink (development link) if it doesn't exist
+            val devLink = File(libDir, baseName)
+            if (!devLink.exists()) {
+                try {
+                    java.nio.file.Files.createSymbolicLink(devLink.toPath(), file.toPath())
+                } catch (_: Exception) {
+                    try { devLink.copyFrom(file) } catch (_: Exception) {}
+                }
+            }
+        }
+    }
+
+    private fun File.copyFrom(src: File) {
+        src.inputStream().use { input ->
+            this.outputStream().use { output -> input.copyTo(output) }
+        }
+    }
+
+    /**
+     * CRITICAL: Configure termux-exec for path translation.
      *
-     * Most importantly: apt/pkg use the PREFIX environment variable, so
-     * setting PREFIX=our_path fixes the package manager.
+     * libtermux-exec.so intercepts file system calls and remaps:
+     *   /data/data/com.termux/files/usr/ -> our actual prefix
+     *   /data/data/com.termux/files/home/ -> our home
+     *
+     * For this to work, it needs these EXACT environment variables:
+     *   TERMUX_PREFIX           = /data/data/com.pocketagent/files/usr
+     *   TERMUX_APP__DATA_DIR    = /data/data/com.pocketagent/files  (note double underscore)
+     *   TERMUX_ANDROID_HOME     = /data/data/com.pocketagent/files/workspace
+     *
+     * Without these, termux-exec doesn't know where to redirect paths.
      */
     private fun createSymlinkBridge() {
-        // Create a wrapper script that sets up the environment correctly
         val wrapperDir = File(usrDir, "etc/profile.d")
         if (!wrapperDir.exists()) wrapperDir.mkdirs()
 
-        // Profile script that sets up paths
         val profileScript = File(wrapperDir, "pocketagent-paths.sh")
         profileScript.writeText("""
-            # PocketAgent path configuration
-            # Fixes hardcoded Termux paths by setting environment variables
+            # PocketAgent path configuration for termux-exec
+            # These env vars tell libtermux-exec.so where to redirect /data/data/com.termux/ paths
+
             export PREFIX="${usrDir.absolutePath}"
             export TERMUX_PREFIX="${usrDir.absolutePath}"
-            export TERMUX_ANDROID_HOME="${workspace.homeDir.absolutePath}"
             export TERMUX_APP__DATA_DIR="${context.filesDir.absolutePath}"
-            export LD_LIBRARY_PATH="${File(usrDir, "lib").absolutePath}"
-            export PATH="${binDir.absolutePath}:/system/bin:/system/xbin:${'$'}PATH"
+            export TERMUX_ANDROID_HOME="${workspace.homeDir.absolutePath}"
+            export TERMUX_HOME="${workspace.homeDir.absolutePath}"
 
-            # Create a fake termux path via function override
-            # This tricks scripts that use absolute termux paths
-            if [ ! -d "/data/data/com.termux/files/usr" ]; then
-                # We can't create this path, but we can warn
-                true
-            fi
+            export LD_LIBRARY_PATH="${File(usrDir, "lib").absolutePath}"
+            export PATH="${binDir.absolutePath}:/system/bin:/system/xbin"
+
+            # Suppress the profile.d permission denied warnings
+            # (termux-exec redirects /data/data/com.termux/ but some files still fail)
+            2>/dev/null
         """.trimIndent())
         profileScript.setExecutable(true, true)
         profileScript.setReadable(true, true)

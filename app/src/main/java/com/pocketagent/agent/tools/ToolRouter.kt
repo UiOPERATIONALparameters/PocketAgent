@@ -12,8 +12,8 @@ import javax.inject.Singleton
  * All tools are injected via Hilt and registered here.
  *
  * CRITICAL: All tool execution is forced onto the IO dispatcher to prevent
- * NetworkOnMainThreadException (web_fetch) and to keep the UI responsive
- * (bash, file operations).
+ * NetworkOnMainThreadException (web_fetch, web_search) and to keep the UI
+ * responsive (bash, file operations).
  */
 @Singleton
 class ToolRouter @Inject constructor(
@@ -21,14 +21,16 @@ class ToolRouter @Inject constructor(
     private val fileReadTool: FileReadTool,
     private val fileWriteTool: FileWriteTool,
     private val fileListTool: FileListTool,
-    private val webFetchTool: WebFetchTool
+    private val webFetchTool: WebFetchTool,
+    private val webSearchTool: WebSearchTool
 ) {
     private val tools: Map<String, AgentTool> = mapOf(
         bashTool.name to bashTool,
         fileReadTool.name to fileReadTool,
         fileWriteTool.name to fileWriteTool,
         fileListTool.name to fileListTool,
-        webFetchTool.name to webFetchTool
+        webFetchTool.name to webFetchTool,
+        webSearchTool.name to webSearchTool
     )
 
     fun specs(): List<ToolSpec> = listOf(
@@ -36,15 +38,26 @@ class ToolRouter @Inject constructor(
         fileReadTool.toSpec(),
         fileWriteTool.toSpec(),
         fileListTool.toSpec(),
-        webFetchTool.toSpec()
+        webFetchTool.toSpec(),
+        webSearchTool.toSpec()
     )
+
+    /**
+     * Returns specs for a subset of tools (for token save mode).
+     */
+    fun specsForMode(tokenSaveMode: Boolean): List<ToolSpec> {
+        return if (tokenSaveMode) {
+            // Token save mode: no tools, just chat
+            emptyList()
+        } else {
+            specs()
+        }
+    }
 
     suspend fun execute(toolName: String, arguments: JsonElement): ToolResult {
         val tool = tools[toolName]
             ?: return ToolResult.Error("Unknown tool: $toolName")
         return try {
-            // CRITICAL: Force IO dispatcher — prevents NetworkOnMainThreadException
-            // for web_fetch and keeps UI responsive for bash/file operations
             withContext(Dispatchers.IO) {
                 tool.execute(arguments)
             }

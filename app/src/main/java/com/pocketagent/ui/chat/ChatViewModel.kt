@@ -315,7 +315,8 @@ class ChatViewModel @Inject constructor(
                         modelId = modelId,
                         messages = history,
                         systemPrompt = settings.settings.value.systemPrompt.ifBlank { AgentLoop.DEFAULT_SYSTEM_PROMPT },
-                        maxIterations = settings.settings.value.maxToolIterations
+                        maxIterations = settings.settings.value.maxToolIterations,
+                        tokenSaveMode = settings.settings.value.tokenSaveMode
                     ).collect { event ->
                         when (event.type) {
                             AgentLoop.Event.Type.CONTENT_DELTA -> {

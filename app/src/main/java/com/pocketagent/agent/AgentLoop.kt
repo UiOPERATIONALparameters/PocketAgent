@@ -72,13 +72,22 @@ class AgentLoop @Inject constructor(
         modelId: String,
         messages: List<ChatMessage>,
         systemPrompt: String = DEFAULT_SYSTEM_PROMPT,
-        maxIterations: Int = 30
+        maxIterations: Int = 30,
+        tokenSaveMode: Boolean = false
     ): Flow<Event> = flow {
+        // In token save mode: use minimal system prompt and no tools
+        val effectiveSystemPrompt = if (tokenSaveMode) {
+            // Minimal prompt — just the user's custom prompt if set, otherwise very short
+            if (systemPrompt != DEFAULT_SYSTEM_PROMPT) systemPrompt else "You are PocketAgent, a helpful AI assistant."
+        } else {
+            systemPrompt
+        }
+
         var currentMessages = mutableListOf<ChatMessage>().apply {
-            add(ChatMessage(role = ChatMessage.Role.System, content = systemPrompt))
+            add(ChatMessage(role = ChatMessage.Role.System, content = effectiveSystemPrompt))
             addAll(messages)
         }
-        val tools = toolRouter.specs()
+        val tools = if (tokenSaveMode) emptyList() else toolRouter.specs()
         val knownToolNames = tools.map { it.name }.toSet()
 
         for (iteration in 0 until maxIterations) {

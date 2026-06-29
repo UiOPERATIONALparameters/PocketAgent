@@ -398,6 +398,52 @@ fun SettingsScreen(
                             Toast.makeText(context, "Max iterations saved: ${state.maxToolIterations}", Toast.LENGTH_SHORT).show()
                         }
                     )
+
+                    Spacer(Modifier.height(12.dp))
+
+                    // Token Save Mode toggle
+                    Surface(
+                        color = ext.surface,
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, ext.divider),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Token Save Mode",
+                                    style = PocketType.BodyMedium,
+                                    color = ext.textPrimary
+                                )
+                                Text(
+                                    "Disables tools and uses minimal system prompt. Saves tokens for simple chat. Turn off for full agent mode.",
+                                    style = PocketType.BodySmall,
+                                    color = ext.textSecondary,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                )
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            androidx.compose.material3.Switch(
+                                checked = state.tokenSaveMode,
+                                onCheckedChange = { enabled ->
+                                    viewModel.onTokenSaveModeChange(enabled)
+                                    viewModel.saveTokenSaveMode()
+                                    Toast.makeText(
+                                        context,
+                                        if (enabled) "Token save mode ON — tools disabled" else "Full agent mode ON — tools enabled",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                },
+                                colors = androidx.compose.material3.SwitchDefaults.colors(
+                                    checkedThumbColor = ext.accent,
+                                    checkedTrackColor = ext.accent.copy(alpha = 0.3f)
+                                )
+                            )
+                        }
+                    }
                 }
 
                 // Linux Environment section

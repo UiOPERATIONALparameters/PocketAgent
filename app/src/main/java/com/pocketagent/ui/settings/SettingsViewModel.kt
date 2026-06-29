@@ -30,6 +30,7 @@ data class SettingsUiState(
     val bashTimeoutSec: Int = 30,
     val workspaceQuotaMb: Int = 2048,
     val maxToolIterations: Int = 30,
+    val tokenSaveMode: Boolean = false,
     // Bootstrap (Termux) state
     val bootstrapInstalled: Boolean = false,
     val bootstrapInstalling: Boolean = false,
@@ -64,6 +65,7 @@ class SettingsViewModel @Inject constructor(
                         bashTimeoutSec = s.bashCommandTimeoutSec,
                         workspaceQuotaMb = s.workspaceQuotaMb,
                         maxToolIterations = s.maxToolIterations,
+                        tokenSaveMode = s.tokenSaveMode,
                         bootstrapInstalled = bootstrapInstaller.isInstalled()
                     )
                 }
@@ -75,6 +77,7 @@ class SettingsViewModel @Inject constructor(
                         bashTimeoutSec = s.bashCommandTimeoutSec,
                         workspaceQuotaMb = s.workspaceQuotaMb,
                         maxToolIterations = s.maxToolIterations,
+                        tokenSaveMode = s.tokenSaveMode,
                         bootstrapInstalled = bootstrapInstaller.isInstalled()
                     )
                 }
@@ -89,6 +92,7 @@ class SettingsViewModel @Inject constructor(
     fun onBashTimeoutChange(sec: Int) = _state.update { it.copy(bashTimeoutSec = sec) }
     fun onWorkspaceQuotaChange(mb: Int) = _state.update { it.copy(workspaceQuotaMb = mb) }
     fun onMaxIterationsChange(iterations: Int) = _state.update { it.copy(maxToolIterations = iterations) }
+    fun onTokenSaveModeChange(enabled: Boolean) = _state.update { it.copy(tokenSaveMode = enabled) }
 
     suspend fun save() {
         val s = _state.value
@@ -158,6 +162,12 @@ class SettingsViewModel @Inject constructor(
     fun saveMaxIterations() {
         viewModelScope.launch {
             settingsRepository.updateSettings { it.copy(maxToolIterations = _state.value.maxToolIterations) }
+        }
+    }
+
+    fun saveTokenSaveMode() {
+        viewModelScope.launch {
+            settingsRepository.updateSettings { it.copy(tokenSaveMode = _state.value.tokenSaveMode) }
         }
     }
 

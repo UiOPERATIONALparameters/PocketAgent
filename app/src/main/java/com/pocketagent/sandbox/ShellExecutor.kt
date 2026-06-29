@@ -100,13 +100,20 @@ class ShellExecutor @Inject constructor(
             // CRITICAL: Set LD_LIBRARY_PATH — the dynamic linker searches here for shared libs
             env["LD_LIBRARY_PATH"] = libDir.absolutePath
 
-            // Set LD_PRELOAD for termux-exec (path translation)
+            // CRITICAL: Set LD_PRELOAD for termux-exec (path translation)
+            // This library intercepts file system calls and remaps
+            // /data/data/com.termux/ -> our actual paths
             if (termuxExec.exists()) {
                 env["LD_PRELOAD"] = termuxExec.absolutePath
             }
 
-            // Set PREFIX — Termux packages use this to find their root
+            // CRITICAL: These env vars tell termux-exec WHERE to redirect paths
+            // Without them, termux-exec doesn't intercept any calls
             env["PREFIX"] = usrDir.absolutePath
+            env["TERMUX_PREFIX"] = usrDir.absolutePath
+            env["TERMUX_APP__DATA_DIR"] = context.filesDir.absolutePath  // note double underscore
+            env["TERMUX_ANDROID_HOME"] = workspace.homeDir.absolutePath
+            env["TERMUX_HOME"] = workspace.homeDir.absolutePath
 
             // Set TMPDIR to a writable location inside the workspace
             env["TMPDIR"] = workspace.tmpDir.absolutePath
