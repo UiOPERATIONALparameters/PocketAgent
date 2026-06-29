@@ -1,0 +1,74 @@
+<resources>
+    <string name="app_name">PocketAgent</string>
+    <string name="app_name_long">PocketAgent</string>
+
+    <!-- Onboarding -->
+    <string name="onboarding_welcome_title">Welcome to PocketAgent</string>
+    <string name="onboarding_welcome_subtitle">Your AI agent, on your phone. Total freedom. Your keys.</string>
+    <string name="onboarding_welcome_cta">Get Started</string>
+
+    <string name="onboarding_provider_title">Connect your model</string>
+    <string name="onboarding_provider_subtitle">Bring your own key. Choose any OpenAI-compatible gateway.</string>
+
+    <string name="onboarding_model_title">Pick a model</string>
+    <string name="onboarding_model_subtitle">We fetched the model list from your gateway.</string>
+
+    <!-- Chat -->
+    <string name="chat_placeholder">Ask anything, or describe a task…</string>
+    <string name="chat_send">Send</string>
+    <string name="chat_stop">Stop</string>
+    <string name="chat_new">New Chat</string>
+    <string name="chat_empty_title">What can I help with?</string>
+    <string name="chat_empty_subtitle">Your agent can run commands, write files, fetch the web.</string>
+
+    <!-- Agent status -->
+    <string name="agent_idle">Idle</string>
+    <string name="agent_thinking">Thinking…</string>
+    <string name="agent_running_tool">Running %1$s</string>
+    <string name="agent_streaming">Responding…</string>
+
+    <!-- Tools -->
+    <string name="tool_bash">bash</string>
+    <string name="tool_file_read">file_read</string>
+    <string name="tool_file_write">file_write</string>
+    <string name="tool_file_list">file_list</string>
+    <string name="tool_web_fetch">web_fetch</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_provider">Provider</string>
+    <string name="settings_gateway_url">Gateway URL</string>
+    <string name="settings_api_key">API Key</string>
+    <string name="settings_model">Model</string>
+    <string name="settings_test_connection">Test Connection</string>
+    <string name="settings_test_ok">Connected. Found %1$d models.</string>
+    <string name="settings_test_fail">Failed: %1$s</string>
+    <string name="settings_clear_keys">Clear All Keys</string>
+    <string name="settings_about">About</string>
+    <string name="settings_version">Version %1$s</string>
+
+    <!-- Files -->
+    <string name="files_title">Agent Workspace</string>
+    <string name="files_empty">No files yet. Ask the agent to create something.</string>
+
+    <!-- Notifications -->
+    <string name="notif_channel_name">Agent Activity</string>
+    <string name="notif_channel_desc">Shows when the agent is running tasks in the background</string>
+    <string name="notif_running_title">Agent working…</string>
+    <string name="notif_running_text">%1$s</string>
+
+    <!-- Errors -->
+    <string name="error_no_provider">No provider configured. Open Settings to add one.</string>
+    <string name="error_no_key">API key required</string>
+    <string name="error_no_model">Pick a model first</string>
+    <string name="error_network">Network error: %1$s</string>
+    <string name="error_stream">Stream interrupted: %1$s</string>
+
+    <!-- Misc -->
+    <string name="cancel">Cancel</string>
+    <string name="save">Save</string>
+    <string name="delete">Delete</string>
+    <string name="confirm">Confirm</string>
+    <string name="ok">OK</string>
+    <string name="back">Back</string>
+</resources>

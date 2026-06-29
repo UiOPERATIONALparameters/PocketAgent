@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Splash background matches Kimi off-white -->
+    <color name="splash_bg">#FFF9FBFC</color>
+    <color name="ic_launcher_background">#FFF9FBFC</color>
+    <color name="ic_splash_icon_tint">#FF0A0A0A</color>
+</resources>
