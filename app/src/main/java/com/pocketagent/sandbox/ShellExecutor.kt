@@ -156,19 +156,23 @@ class ShellExecutor @Inject constructor(
                 usedBootstrap = effectiveBootstrap
             )
         } else {
-            val (stdout, stderr, exitCode) = timedOut
+            val stdoutPair = timedOut.first
+            val stderrPair = timedOut.second
+            val exitCode = timedOut.third
+            val stdoutStr = stdoutPair.first
+            val stderrStr = stderrPair.first
             // If bash failed to start, append diagnostic info
-            val enrichedStderr = if (exitCode != 0 && effectiveBootstrap && stderr.contains("not found", ignoreCase = true)) {
-                "$stderr\n\n--- Diagnostic Info ---\n${bootstrapInstaller.getDiagnosticInfo()}"
+            val enrichedStderr = if (exitCode != 0 && effectiveBootstrap && stderrStr.contains("not found", ignoreCase = true)) {
+                "$stderrStr\n\n--- Diagnostic Info ---\n${bootstrapInstaller.getDiagnosticInfo()}"
             } else {
-                stderr
+                stderrStr
             }
             Result(
-                stdout = stdout.first,
+                stdout = stdoutStr,
                 stderr = enrichedStderr,
                 exitCode = exitCode,
                 durationMs = System.currentTimeMillis() - start,
-                truncated = stdout.second || stderr.second,
+                truncated = stdoutPair.second || stderrPair.second,
                 usedBootstrap = effectiveBootstrap
             )
         }
