@@ -52,7 +52,7 @@ class ActiveProviderHolder(
         return OpenAICompatibleProvider(config, httpClient)
     }
 
-    fun forConfig(com.pocketagent.storage.prefs.ProviderConfig): LlmProvider {
-        return OpenAICompatibleProvider(com.pocketagent.storage.prefs.ProviderConfig, httpClient)
+    fun forConfig(config: com.pocketagent.storage.prefs.ProviderConfig): LlmProvider {
+        return OpenAICompatibleProvider(config, httpClient)
     }
 }
