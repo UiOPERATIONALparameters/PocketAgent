@@ -31,6 +31,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -190,7 +191,7 @@ private fun ProviderStep(
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(12.dp),
-            colors = TextFieldDefaults.colors(
+            colors = OutlinedTextFieldDefaults.colors(
                 focusedContainerColor = ext.surface,
                 unfocusedContainerColor = ext.surface,
                 focusedBorderColor = ext.accent,
@@ -213,7 +214,7 @@ private fun ProviderStep(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(12.dp),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
-            colors = TextFieldDefaults.colors(
+            colors = OutlinedTextFieldDefaults.colors(
                 focusedContainerColor = ext.surface,
                 unfocusedContainerColor = ext.surface,
                 focusedBorderColor = ext.accent,
@@ -246,7 +247,7 @@ private fun ProviderStep(
                     )
                 }
             },
-            colors = TextFieldDefaults.colors(
+            colors = OutlinedTextFieldDefaults.colors(
                 focusedContainerColor = ext.surface,
                 unfocusedContainerColor = ext.surface,
                 focusedBorderColor = ext.accent,
@@ -350,7 +351,7 @@ private fun ModelStep(
             leadingIcon = {
                 Icon(Icons.Filled.Search, contentDescription = null, tint = ext.textSecondary)
             },
-            colors = TextFieldDefaults.colors(
+            colors = OutlinedTextFieldDefaults.colors(
                 focusedContainerColor = ext.surface,
                 unfocusedContainerColor = ext.surface,
                 focusedBorderColor = ext.accent,

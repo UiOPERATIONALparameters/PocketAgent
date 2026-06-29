@@ -34,7 +34,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -200,7 +200,7 @@ fun SettingsScreen(
                             leadingIcon = {
                                 Icon(Icons.Filled.Search, contentDescription = null, tint = ext.textSecondary)
                             },
-                            colors = TextFieldDefaults.colors(
+                            colors = OutlinedTextFieldDefaults.colors(
                                 focusedContainerColor = ext.surface,
                                 unfocusedContainerColor = ext.surface,
                                 focusedBorderColor = ext.accent,
@@ -335,7 +335,7 @@ private fun LabeledField(
             keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = ImeAction.Next),
             visualTransformation = visualTransformation,
             trailingIcon = trailingIcon,
-            colors = TextFieldDefaults.colors(
+            colors = OutlinedTextFieldDefaults.colors(
                 focusedContainerColor = ext.surface,
                 unfocusedContainerColor = ext.surface,
                 focusedBorderColor = ext.accent,
