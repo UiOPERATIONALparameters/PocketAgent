@@ -285,8 +285,10 @@ class ChatViewModel @Inject constructor(
                 messageDao.getForConversation(conversationId).map { it.toLlm() }
             }
 
-            // Track tool calls for persistence
+            // Track tool calls for persistence — maps toolCallId to assistant message ID
             val pendingToolCalls = mutableMapOf<String, PendingToolCall>()
+            // Track the current iteration's assistant message ID (for tool_calls persistence)
+            var currentAssistantMsgId: String? = null
 
             agentJob = viewModelScope.launch {
                 try {
@@ -307,13 +309,50 @@ class ChatViewModel @Inject constructor(
                                     it.copy(streamingReasoning = it.streamingReasoning + event.reasoning)
                                 }
                             }
+                            AgentLoop.Event.Type.TOOL_CALLS_READY -> {
+                                // CRITICAL: Persist the assistant message WITH tool_calls array.
+                                // This MUST happen before tool result messages are persisted,
+                                // so the conversation history sent to the LLM includes:
+                                //   assistant { tool_calls: [...] }
+                                //   tool { tool_call_id: X }
+                                // Without this, the API rejects with "tool call id not found".
+                                val toolCalls = event.toolCalls ?: emptyList()
+                                val assistantMsgId = UUID.randomUUID().toString()
+                                currentAssistantMsgId = assistantMsgId
+                                val toolCallsJson = json.encodeToString(
+                                    kotlinx.serialization.builtins.ListSerializer(ChatMessage.ToolCall.serializer()),
+                                    toolCalls
+                                )
+                                messageDao.upsert(
+                                    MessageEntity(
+                                        id = assistantMsgId,
+                                        conversationId = conversationId,
+                                        role = "assistant",
+                                        content = event.content.ifEmpty { null },
+                                        reasoning = event.reasoning.ifEmpty { null },
+                                        toolCallsJson = toolCallsJson,
+                                        toolCallId = null,
+                                        toolName = null,
+                                        createdAt = System.currentTimeMillis(),
+                                        isStreaming = false
+                                    )
+                                )
+                                // Clear streaming content since we've persisted it
+                                _state.update {
+                                    it.copy(
+                                        streamingContent = "",
+                                        streamingReasoning = ""
+                                    )
+                                }
+                            }
                             AgentLoop.Event.Type.TOOL_CALL_START -> {
                                 val tcId = event.toolCallId ?: return@collect
                                 val msgId = UUID.randomUUID().toString()
                                 pendingToolCalls[tcId] = PendingToolCall(
                                     messageId = msgId,
                                     toolName = event.toolName ?: "unknown",
-                                    arguments = event.toolArguments ?: "{}"
+                                    arguments = event.toolArguments ?: "{}",
+                                    assistantMsgId = currentAssistantMsgId
                                 )
                                 // Add to visible streaming tool calls
                                 _state.update {
@@ -327,7 +366,7 @@ class ChatViewModel @Inject constructor(
                                         activeToolName = event.toolName
                                     )
                                 }
-                                // Persist the tool call as a message
+                                // Persist a placeholder tool message (will be updated with result)
                                 messageDao.upsert(
                                     MessageEntity(
                                         id = msgId,
@@ -335,7 +374,7 @@ class ChatViewModel @Inject constructor(
                                         role = "tool",
                                         content = null,
                                         reasoning = null,
-                                        toolCallsJson = event.toolArguments,
+                                        toolCallsJson = null,
                                         toolCallId = tcId,
                                         toolName = event.toolName,
                                         createdAt = System.currentTimeMillis(),
@@ -366,7 +405,7 @@ class ChatViewModel @Inject constructor(
                                         role = "tool",
                                         content = event.toolResult,
                                         reasoning = null,
-                                        toolCallsJson = pending.arguments,
+                                        toolCallsJson = null,
                                         toolCallId = tcId,
                                         toolName = pending.toolName,
                                         createdAt = System.currentTimeMillis(),
@@ -539,11 +578,33 @@ class ChatViewModel @Inject constructor(
                 ChatMessage(role = ChatMessage.Role.User, content = content)
             }
         }
-        "assistant" -> ChatMessage(
-            role = ChatMessage.Role.Assistant,
-            content = content,
-            reasoning = reasoning
-        )
+        "assistant" -> {
+            // CRITICAL: Reconstruct tool_calls array from toolCallsJson
+            // This is needed so the LLM API sees: assistant { tool_calls: [...] }
+            // before the tool result messages.
+            val toolCalls = toolCallsJson?.let { jsonStr ->
+                try {
+                    json.decodeFromString(
+                        kotlinx.serialization.builtins.ListSerializer(ChatMessage.ToolCall.serializer()),
+                        jsonStr
+                    )
+                } catch (_: Exception) { null }
+            }
+            if (toolCalls != null && toolCalls.isNotEmpty()) {
+                ChatMessage(
+                    role = ChatMessage.Role.Assistant,
+                    content = content,
+                    reasoning = reasoning,
+                    toolCalls = toolCalls
+                )
+            } else {
+                ChatMessage(
+                    role = ChatMessage.Role.Assistant,
+                    content = content,
+                    reasoning = reasoning
+                )
+            }
+        }
         "tool" -> ChatMessage(
             role = ChatMessage.Role.Tool,
             content = content,
@@ -557,6 +618,7 @@ class ChatViewModel @Inject constructor(
     private data class PendingToolCall(
         val messageId: String,
         val toolName: String,
-        val arguments: String
+        val arguments: String,
+        val assistantMsgId: String?
     )
 }

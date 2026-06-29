@@ -4,6 +4,9 @@ import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -16,24 +19,8 @@ import javax.inject.Singleton
  * userland (bash, python, node, git, ffmpeg, apt, etc.) inside the app's
  * private storage.
  *
- * The bootstrap is ~50MB and is downloaded on-demand (not bundled in APK)
- * to keep the APK small. After extraction, ShellExecutor automatically
- * uses the bootstrap's bash.
- *
- * Layout after install:
- *   /data/data/com.pocketagent/files/usr/
- *     ├── bin/       (bash, ls, cat, grep, python, node, git, etc.)
- *     ├── lib/       (shared libraries)
- *     ├── share/     (docs, man pages)
- *     └── etc/       (config)
- *
- * The AI can then:
- *   - apt install python node ffmpeg git
- *   - pip install requests
- *   - python script.py
- *   - node script.js
- *   - git clone https://github.com/...
- *   - curl https://...
+ * The bootstrap URL is fetched dynamically from the GitHub API to always
+ * get the latest working release.
  */
 @Singleton
 class BootstrapInstaller @Inject constructor(
@@ -41,14 +28,13 @@ class BootstrapInstaller @Inject constructor(
     private val workspace: Workspace
 ) {
     companion object {
-        // Termux bootstrap for aarch64 (ARM 64-bit — covers 99% of modern Android phones)
-        // This is a stable release from the Termux project (Apache 2.0 license)
-        private const val BOOTSTRAP_URL =
-            "https://github.com/termux/termux-packages/releases/download/bootstrap-2025.01.25T08%3A33%3A00%2B00%3A00/bootstrap-aarch64.zip"
+        // GitHub API endpoint to find the latest bootstrap release
+        private const val GITHUB_API_URL = "https://api.github.com/repos/termux/termux-packages/releases"
 
-        // Alternative URLs (tried in order if primary fails)
+        // Fallback URLs (tried if API fails)
         private val FALLBACK_URLS = listOf(
-            "https://packages.termux.dev/bootstrap/aarch64/bootstrap-aarch64.zip"
+            "https://github.com/termux/termux-packages/releases/latest/download/bootstrap-aarch64.zip",
+            "https://packages.termux.dev/bootstrap-aarch64.zip"
         )
 
         const val MARKER_FILE = ".bootstrap_installed"
@@ -58,12 +44,10 @@ class BootstrapInstaller @Inject constructor(
     val binDir: File = File(usrDir, "bin")
     val bashPath: File get() = File(binDir, "bash")
 
-    /** Check if bootstrap is already installed. */
     fun isInstalled(): Boolean {
         return File(usrDir, MARKER_FILE).exists() && bashPath.exists()
     }
 
-    /** Get the bash binary path, or null if not installed. */
     fun getBashPath(): String? {
         return if (isInstalled()) bashPath.absolutePath else null
     }
@@ -74,36 +58,44 @@ class BootstrapInstaller @Inject constructor(
      */
     suspend fun install(onProgress: (Long, Long) -> Unit): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            // Download
             val zipFile = File(context.cacheDir, "bootstrap-aarch64.zip")
-            val downloadResult = downloadZip(BOOTSTRAP_URL, zipFile, onProgress)
-            if (downloadResult.isFailure) {
-                // Try fallback URLs
-                var success = false
-                for (url in FALLBACK_URLS) {
-                    val fallbackResult = downloadZip(url, zipFile, onProgress)
-                    if (fallbackResult.isSuccess) {
-                        success = true
-                        break
-                    }
-                }
-                if (!success) {
-                    return@withContext Result.failure(IOException("Failed to download bootstrap from all URLs"))
+
+            // Try to find the latest bootstrap URL from GitHub API
+            val urls = mutableListOf<String>()
+            val apiUrl = findLatestBootstrapUrl()
+            if (apiUrl != null) {
+                urls.add(apiUrl)
+            }
+            urls.addAll(FALLBACK_URLS)
+
+            var downloadSuccess = false
+            var lastError: String? = null
+
+            for (url in urls) {
+                onProgress(-1, -1)
+                val downloadResult = downloadZip(url, zipFile, onProgress)
+                if (downloadResult.isSuccess) {
+                    downloadSuccess = true
+                    break
+                } else {
+                    lastError = downloadResult.exceptionOrNull()?.message
                 }
             }
 
+            if (!downloadSuccess) {
+                return@withContext Result.failure(IOException("Failed to download bootstrap from all URLs. Last error: $lastError"))
+            }
+
             // Extract
-            onProgress(-1, -1) // Signal: extracting phase
+            onProgress(-1, -1)
             extractZip(zipFile, usrDir)
 
-            // Set executable permissions on all binaries in bin/
+            // Set executable permissions
             binDir.listFiles()?.forEach { file ->
                 if (file.isFile) {
                     file.setExecutable(true, true)
                 }
             }
-
-            // Also set +x on lib/*.so (some are loaded by executables)
             File(usrDir, "lib").listFiles()?.forEach { file ->
                 if (file.isFile && file.name.endsWith(".so")) {
                     file.setExecutable(true, true)
@@ -113,17 +105,59 @@ class BootstrapInstaller @Inject constructor(
             // Create marker file
             File(usrDir, MARKER_FILE).writeText(System.currentTimeMillis().toString())
 
-            // Clean up zip
-            zipFile.delete()
-
             // Create default workspace structure
             workspace.projectsDir
             workspace.tmpDir
             workspace.downloadsDir
 
+            // Clean up zip
+            zipFile.delete()
+
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    /**
+     * Query the GitHub API to find the latest bootstrap-aarch64.zip URL.
+     */
+    private fun findLatestBootstrapUrl(): String? {
+        return try {
+            val client = OkHttpClient.Builder()
+                .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+
+            val request = Request.Builder()
+                .url(GITHUB_API_URL)
+                .header("Accept", "application/vnd.github.v3+json")
+                .header("User-Agent", "PocketAgent")
+                .get()
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val body = response.body?.string() ?: return null
+                val releases = JSONObject(body)
+                if (releases.length() == 0) return null
+
+                // Look through releases for one with bootstrap-aarch64.zip asset
+                for (i in 0 until releases.length()) {
+                    val release = releases.optJSONObject(i) ?: continue
+                    val assets = release.optJSONArray("assets") ?: continue
+                    for (j in 0 until assets.length()) {
+                        val asset = assets.optJSONObject(j) ?: continue
+                        val name = asset.optString("name")
+                        if (name == "bootstrap-aarch64.zip") {
+                            return asset.optString("browser_download_url")
+                        }
+                    }
+                }
+                null
+            }
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -133,7 +167,7 @@ class BootstrapInstaller @Inject constructor(
             connection.connectTimeout = 30_000
             connection.readTimeout = 300_000
             connection.instanceFollowRedirects = true
-            connection.setRequestProperty("User-Agent", "PocketAgent/0.4")
+            connection.setRequestProperty("User-Agent", "PocketAgent/0.5")
 
             if (connection.responseCode != java.net.HttpURLConnection.HTTP_OK) {
                 connection.disconnect()
@@ -169,7 +203,6 @@ class BootstrapInstaller @Inject constructor(
             var entry = zis.nextEntry
             while (entry != null) {
                 val entryPath = entry.name
-                // Security: prevent path traversal
                 if (entryPath.contains("..")) {
                     zis.closeEntry()
                     entry = zis.nextEntry
@@ -187,7 +220,6 @@ class BootstrapInstaller @Inject constructor(
                     FileOutputStream(outFile).use { fos ->
                         zis.copyTo(fos)
                     }
-                    // Set executable for files in bin/
                     if (entryPath.contains("/bin/")) {
                         outFile.setExecutable(true, true)
                     }
@@ -198,14 +230,12 @@ class BootstrapInstaller @Inject constructor(
         }
     }
 
-    /** Uninstall the bootstrap (frees ~200MB). */
     fun uninstall() {
         if (usrDir.exists()) {
             usrDir.deleteRecursively()
         }
     }
 
-    /** Get the PATH environment variable for the bootstrap. */
     fun getPath(): String {
         return listOf(
             binDir.absolutePath,

@@ -8,6 +8,7 @@ import com.pocketagent.llm.LlmRequest
 import com.pocketagent.llm.StreamDelta
 import com.pocketagent.llm.ToolSpec
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
@@ -26,8 +27,13 @@ import javax.inject.Singleton
  * 3. If the LLM emits a tool call, execute it and feed result back
  * 4. Repeat until the LLM finishes with no tool calls
  *
- * Mirrors Anthropic's Computer Use agent loop. Works with any OpenAI-compatible
- * model that supports function calling (GLM 5.2, Claude, GPT-4o, etc).
+ * CRITICAL: The TOOL_CALLS_READY event fires AFTER all tool calls in an
+ * iteration are accumulated but BEFORE execution. The caller MUST persist
+ * an assistant message with the tool_calls array at this point, so that
+ * the conversation history sent to the LLM on the next turn includes:
+ *   assistant { tool_calls: [...] }
+ *   tool { tool_call_id: X, content: ... }
+ * Without the assistant message, the API rejects with "tool call id not found".
  */
 @Singleton
 class AgentLoop @Inject constructor(
@@ -42,11 +48,13 @@ class AgentLoop @Inject constructor(
         val toolArguments: String? = null,
         val toolResult: String? = null,
         val toolDisplay: String? = null,
+        val toolCalls: List<ChatMessage.ToolCall>? = null,  // for TOOL_CALLS_READY
         val error: String? = null
     ) {
         enum class Type {
             CONTENT_DELTA,
             REASONING_DELTA,
+            TOOL_CALLS_READY,   // NEW: all tool calls accumulated, about to execute
             TOOL_CALL_START,
             TOOL_RESULT,
             FINISHED,
@@ -85,6 +93,7 @@ class AgentLoop @Inject constructor(
             val reasoningBuilder = StringBuilder()
             val toolCallAccumulators = mutableMapOf<Int, ToolCallAccumulator>()
             var finishReason: String? = null
+            var streamError: String? = null
 
             try {
                 provider.stream(request).collect { delta ->
@@ -101,20 +110,15 @@ class AgentLoop @Inject constructor(
                             val acc = toolCallAccumulators.getOrPut(delta.index) {
                                 ToolCallAccumulator()
                             }
-                            // CRITICAL FIX: Only set name from the FIRST non-null name.
-                            // Some models send the name in multiple chunks or resend it
-                            // with partial values. Overwriting corrupts the name.
                             if (delta.id != null && acc.id == null) {
                                 acc.id = delta.id
                             }
                             if (delta.name != null && acc.name == null) {
-                                // Only accept the name if it looks valid (alphanumeric + underscore)
                                 val candidateName = delta.name.trim()
                                 if (candidateName.isNotEmpty() && candidateName.matches(Regex("^[a-zA-Z_][a-zA-Z0-9_]*$"))) {
                                     acc.name = candidateName
                                 }
                             }
-                            // Accumulate arguments
                             if (delta.argumentsChunk.isNotEmpty()) {
                                 acc.argumentsBuilder.append(delta.argumentsChunk)
                             }
@@ -124,13 +128,11 @@ class AgentLoop @Inject constructor(
                         }
                         is StreamDelta.Usage -> {}
                         is StreamDelta.Error -> {
-                            emit(Event(Event.Type.ERROR, error = delta.message))
-                            return@collect
+                            streamError = delta.message
                         }
                     }
                 }
             } catch (e: CancellationException) {
-                // Stream was cancelled (user tapped Stop, or coroutine was cancelled)
                 emit(Event(Event.Type.FINISHED))
                 return@flow
             } catch (e: Exception) {
@@ -138,8 +140,13 @@ class AgentLoop @Inject constructor(
                 return@flow
             }
 
+            if (streamError != null) {
+                emit(Event(Event.Type.ERROR, error = streamError))
+                return@flow
+            }
+
             // Build tool calls from accumulators
-            val toolCalls = toolCallAccumulators.toSortedMap().values.mapIndexed { idx, acc ->
+            val toolCalls = toolCallAccumulators.toSortedMap().values.map { acc ->
                 val id = acc.id ?: "call_${UUID.randomUUID()}"
                 val name = acc.name ?: ""
                 val arguments = acc.argumentsBuilder.toString().ifEmpty { "{}" }
@@ -164,6 +171,16 @@ class AgentLoop @Inject constructor(
                 return@flow
             }
 
+            // CRITICAL: Emit TOOL_CALLS_READY so caller can persist the assistant
+            // message with tool_calls BEFORE the tool result messages.
+            // Without this, the next LLM call will fail with "tool call id not found".
+            emit(Event(
+                type = Event.Type.TOOL_CALLS_READY,
+                toolCalls = toolCalls,
+                content = contentBuilder.toString().ifEmpty { "" },
+                reasoning = reasoningBuilder.toString().ifEmpty { "" }
+            ))
+
             // Execute each tool call
             for (tc in toolCalls) {
                 // Validate tool name
@@ -175,20 +192,19 @@ class AgentLoop @Inject constructor(
                         toolName = "(empty)",
                         toolArguments = tc.arguments
                     ))
+                    val errorJson = buildJsonObject {
+                        put("error", JsonPrimitive(errMsg))
+                    }.toString()
                     emit(Event(
                         type = Event.Type.TOOL_RESULT,
                         toolCallId = tc.id,
                         toolName = "(empty)",
-                        toolResult = buildJsonObject {
-                            put("error", JsonPrimitive(errMsg))
-                        }.toString(),
+                        toolResult = errorJson,
                         toolDisplay = errMsg
                     ))
                     currentMessages.add(ChatMessage(
                         role = ChatMessage.Role.Tool,
-                        content = buildJsonObject {
-                            put("error", JsonPrimitive(errMsg))
-                        }.toString(),
+                        content = errorJson,
                         toolCallId = tc.id,
                         name = tc.name.ifBlank { "unknown" }
                     ))
@@ -203,20 +219,19 @@ class AgentLoop @Inject constructor(
                         toolName = tc.name,
                         toolArguments = tc.arguments
                     ))
+                    val errorJson = buildJsonObject {
+                        put("error", JsonPrimitive(errMsg))
+                    }.toString()
                     emit(Event(
                         type = Event.Type.TOOL_RESULT,
                         toolCallId = tc.id,
                         toolName = tc.name,
-                        toolResult = buildJsonObject {
-                            put("error", JsonPrimitive(errMsg))
-                        }.toString(),
+                        toolResult = errorJson,
                         toolDisplay = "Error: $errMsg"
                     ))
                     currentMessages.add(ChatMessage(
                         role = ChatMessage.Role.Tool,
-                        content = buildJsonObject {
-                            put("error", JsonPrimitive(errMsg))
-                        }.toString(),
+                        content = errorJson,
                         toolCallId = tc.id,
                         name = tc.name
                     ))
@@ -234,20 +249,19 @@ class AgentLoop @Inject constructor(
                         toolArguments = tc.arguments
                     ))
                     val errMsg = "Invalid JSON arguments: ${e.message}. Raw: ${tc.arguments.take(200)}"
+                    val errorJson = buildJsonObject {
+                        put("error", JsonPrimitive(errMsg))
+                    }.toString()
                     emit(Event(
                         type = Event.Type.TOOL_RESULT,
                         toolCallId = tc.id,
                         toolName = tc.name,
-                        toolResult = buildJsonObject {
-                            put("error", JsonPrimitive(errMsg))
-                        }.toString(),
+                        toolResult = errorJson,
                         toolDisplay = "Error: $errMsg"
                     ))
                     currentMessages.add(ChatMessage(
                         role = ChatMessage.Role.Tool,
-                        content = buildJsonObject {
-                            put("error", JsonPrimitive(errMsg))
-                        }.toString(),
+                        content = errorJson,
                         toolCallId = tc.id,
                         name = tc.name
                     ))
@@ -291,10 +305,11 @@ class AgentLoop @Inject constructor(
                     name = tc.name
                 ))
             }
+            // Loop back to LLM with tool results
         }
 
         // Hit max iterations
-        emit(Event(Event.Type.CONTENT_DELTA, content = "\n\n*[Reached maximum tool call iterations. Stopping to prevent infinite loops.]*"))
+        emit(Event(Event.Type.CONTENT_DELTA, content = "\n\n*[Reached maximum tool call iterations ($maxIterations). Stopping to prevent infinite loops.]*"))
         emit(Event(Event.Type.FINISHED))
     }
 
@@ -314,14 +329,10 @@ You have direct access to the user's device through these tools:
 - file_list: List files and directories in your workspace
 - web_fetch: Fetch a URL via HTTP
 
-Your workspace is a private directory at /data/data/com.pocketagent/files/workspace/.
-You have 'projects', 'tmp', and 'downloads' subdirectories.
-
-You can:
-- Create files, run scripts, parse text
-- Fetch web content (APIs, docs, raw files)
-- Build up projects in your workspace
-- Iterate on tasks autonomously
+Your workspace is a private Linux environment on the user's phone.
+If the Linux environment is installed, you have: bash, python3, node, git, curl, wget, apt/pkg, and more.
+You can install packages with: pkg install <package> or apt install <package>
+The workspace has 'projects', 'tmp', and 'downloads' subdirectories.
 
 IMPORTANT RULES:
 1. Always use the EXACT tool names: bash, file_read, file_write, file_list, web_fetch
@@ -329,6 +340,7 @@ IMPORTANT RULES:
 3. If a tool fails, read the error message and adjust your approach
 4. Be concise in text — let tool calls speak for themselves
 5. After completing a task, summarize what you did
+6. Don't repeat the same failing command — try a different approach
 
 The user can see every tool call you make. Be transparent."""
     }

@@ -40,10 +40,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Send
+import android.widget.Toast
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
@@ -414,10 +416,8 @@ private fun AssistantBubble(text: String, reasoning: String?) {
         }
         // Content
         if (text.isNotEmpty()) {
-            Text(
+            MarkdownText(
                 text = text,
-                style = PocketType.Body,
-                color = extendedColors().bubbleAgentText,
                 modifier = Modifier.padding(horizontal = 4.dp)
             )
         }
@@ -462,10 +462,9 @@ private fun StreamingMessage(
             )
         }
         if (content.isNotEmpty()) {
-            Text(
+            MarkdownText(
                 text = content,
-                style = PocketType.Body,
-                color = extendedColors().bubbleAgentText
+                modifier = Modifier.padding(horizontal = 4.dp)
             )
         }
     }
@@ -514,55 +513,102 @@ private fun ToolCallCard(
     display: String?,
     isRunning: Boolean = false
 ) {
-    var expanded by remember(toolName, arguments, result) { mutableStateOf(false) }
+    val context = LocalContext.current
+    // Auto-expand while running, collapse when done
+    var expanded by remember(toolName, arguments, result, isRunning) { mutableStateOf(isRunning) }
+    val ext = extendedColors()
+
+    // Build a short summary for the collapsed view
+    val summary = remember(arguments, result, isRunning) {
+        buildString {
+            if (toolName == "bash" && arguments != null) {
+                // Extract the command from JSON
+                try {
+                    val obj = org.json.JSONObject(arguments)
+                    val cmd = obj.optString("command", "")
+                    if (cmd.isNotEmpty()) {
+                        // Truncate long commands
+                        append("$ ")
+                        append(cmd.take(80))
+                        if (cmd.length > 80) append("…")
+                    }
+                } catch (_: Exception) {
+                    append(toolName)
+                }
+            } else {
+                append(toolName)
+            }
+            if (isRunning) {
+                append("  ⟳")
+            } else if (result != null) {
+                // Check if it was success or error
+                if (result.contains("\"error\"")) {
+                    append("  ✗")
+                } else {
+                    append("  ✓")
+                }
+            }
+        }
+    }
+
     Surface(
-        color = extendedColors().toolCardBg,
-        shape = RoundedCornerShape(12.dp),
+        color = ext.toolCardBg,
+        shape = RoundedCornerShape(10.dp),
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
-            extendedColors().toolCardBorder
+            ext.toolCardBorder
         ),
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = { expanded = !expanded })
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = toolName,
+                    text = summary,
                     style = PocketType.CodeSmall,
-                    color = extendedColors().accent,
-                    fontWeight = FontWeight.SemiBold
+                    color = if (result?.contains("\"error\"") == true) ext.error else ext.textPrimary,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f)
                 )
-                if (isRunning) {
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        "running…",
-                        style = PocketType.LabelSmall,
-                        color = extendedColors().textTertiary
-                    )
+                // Copy button (only when result is available)
+                if (result != null && !isRunning) {
+                    IconButton(
+                        onClick = {
+                            val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+                            clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("result", display ?: result))
+                            Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.ContentCopy,
+                            contentDescription = "Copy",
+                            tint = ext.textTertiary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
                 }
-                Spacer(Modifier.weight(1f))
                 Icon(
                     imageVector = Icons.Filled.ChevronRight,
                     contentDescription = if (expanded) "Collapse" else "Expand",
-                    tint = extendedColors().textSecondary,
+                    tint = ext.textSecondary,
                     modifier = Modifier.alpha(if (expanded) 1f else 0.5f)
                 )
             }
             AnimatedVisibility(visible = expanded) {
-                Column(modifier = Modifier.padding(top = 8.dp)) {
+                Column(modifier = Modifier.padding(top = 6.dp)) {
                     if (display != null) {
                         Text(
                             text = display,
                             style = PocketType.CodeSmall,
-                            color = extendedColors().textSecondary
+                            color = ext.textSecondary
                         )
                     } else if (result != null) {
                         Text(
                             text = result,
                             style = PocketType.CodeSmall,
-                            color = extendedColors().textSecondary
+                            color = ext.textSecondary
                         )
                     }
                 }
