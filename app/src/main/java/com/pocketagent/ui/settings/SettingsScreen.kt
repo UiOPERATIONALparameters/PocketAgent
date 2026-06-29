@@ -368,6 +368,36 @@ fun SettingsScreen(
                             Toast.makeText(context, "Quota saved: ${state.workspaceQuotaMb}MB", Toast.LENGTH_SHORT).show()
                         }
                     )
+
+                    Spacer(Modifier.height(12.dp))
+
+                    // Max tool iterations
+                    Text("Max Tool Iterations (per turn)", style = PocketType.Label, color = ext.textSecondary)
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = state.maxToolIterations.toString(),
+                        onValueChange = { v -> v.toIntOrNull()?.let { viewModel.onMaxIterationsChange(it.coerceIn(5, 100)) } },
+                        textStyle = PocketType.Body.copy(color = ext.textPrimary),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = ext.surface,
+                            unfocusedContainerColor = ext.surface,
+                            focusedBorderColor = ext.accent,
+                            unfocusedBorderColor = ext.divider,
+                            cursorColor = ext.accent
+                        )
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    SaveButton(
+                        text = "Save Iterations",
+                        onClick = {
+                            viewModel.saveMaxIterations()
+                            Toast.makeText(context, "Max iterations saved: ${state.maxToolIterations}", Toast.LENGTH_SHORT).show()
+                        }
+                    )
                 }
 
                 // Linux Environment section

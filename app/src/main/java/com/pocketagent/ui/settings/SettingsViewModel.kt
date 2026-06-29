@@ -29,10 +29,11 @@ data class SettingsUiState(
     val systemPrompt: String = "",
     val bashTimeoutSec: Int = 30,
     val workspaceQuotaMb: Int = 2048,
+    val maxToolIterations: Int = 30,
     // Bootstrap (Termux) state
     val bootstrapInstalled: Boolean = false,
     val bootstrapInstalling: Boolean = false,
-    val bootstrapProgress: Float = 0f,  // 0..1
+    val bootstrapProgress: Float = 0f,
     val bootstrapStatus: String = ""
 )
 
@@ -62,6 +63,7 @@ class SettingsViewModel @Inject constructor(
                         systemPrompt = s.systemPrompt,
                         bashTimeoutSec = s.bashCommandTimeoutSec,
                         workspaceQuotaMb = s.workspaceQuotaMb,
+                        maxToolIterations = s.maxToolIterations,
                         bootstrapInstalled = bootstrapInstaller.isInstalled()
                     )
                 }
@@ -72,6 +74,7 @@ class SettingsViewModel @Inject constructor(
                         systemPrompt = s.systemPrompt,
                         bashTimeoutSec = s.bashCommandTimeoutSec,
                         workspaceQuotaMb = s.workspaceQuotaMb,
+                        maxToolIterations = s.maxToolIterations,
                         bootstrapInstalled = bootstrapInstaller.isInstalled()
                     )
                 }
@@ -85,6 +88,7 @@ class SettingsViewModel @Inject constructor(
     fun onSystemPromptChange(prompt: String) = _state.update { it.copy(systemPrompt = prompt) }
     fun onBashTimeoutChange(sec: Int) = _state.update { it.copy(bashTimeoutSec = sec) }
     fun onWorkspaceQuotaChange(mb: Int) = _state.update { it.copy(workspaceQuotaMb = mb) }
+    fun onMaxIterationsChange(iterations: Int) = _state.update { it.copy(maxToolIterations = iterations) }
 
     suspend fun save() {
         val s = _state.value
@@ -148,6 +152,12 @@ class SettingsViewModel @Inject constructor(
     fun saveWorkspaceQuota() {
         viewModelScope.launch {
             settingsRepository.updateSettings { it.copy(workspaceQuotaMb = _state.value.workspaceQuotaMb) }
+        }
+    }
+
+    fun saveMaxIterations() {
+        viewModelScope.launch {
+            settingsRepository.updateSettings { it.copy(maxToolIterations = _state.value.maxToolIterations) }
         }
     }
 

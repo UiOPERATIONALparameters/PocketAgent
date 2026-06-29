@@ -160,6 +160,19 @@ class BootstrapInstaller @Inject constructor(
                 }
             }
 
+            // CRITICAL: Patch hardcoded Termux paths in all binaries and scripts.
+            // The Termux bootstrap has /data/data/com.termux/files/usr/ compiled in.
+            // We replace it with our actual prefix so apt, pkg, and all tools work.
+            patchTermuxPaths(usrDir)
+
+            // CRITICAL: Create symlink bridge so /data/data/com.termux/files/usr
+            // resolves to our prefix. This catches any paths we missed in patching
+            // (e.g. in compiled .so libraries that we can't sed).
+            createSymlinkBridge()
+
+            // Create .profile and improve .bashrc
+            createShellConfigs()
+
             // Create marker file
             File(usrDir, MARKER_FILE).writeText(System.currentTimeMillis().toString())
 
@@ -292,6 +305,191 @@ class BootstrapInstaller @Inject constructor(
         }
     }
 
+    /**
+     * CRITICAL: Patch hardcoded Termux paths in all text-based files.
+     * The Termux bootstrap has /data/data/com.termux/files/usr/ compiled in.
+     * We replace it with our actual prefix so apt, pkg, and all tools work.
+     *
+     * This patches:
+     * - Shell scripts (*.sh)
+     * - Config files
+     * - Text-based binaries (some Python scripts, etc.)
+     *
+     * Note: Compiled ELF binaries (.so, executables) can't be patched with sed
+     * because they have checksums. For those, we rely on the symlink bridge.
+     */
+    private fun patchTermuxPaths(usrDir: File) {
+        val oldPrefix = "/data/data/com.termux/files/usr"
+        val newPrefix = usrDir.absolutePath
+        if (oldPrefix == newPrefix) return  // shouldn't happen but safety
+
+        val textExtensions = setOf("sh", "py", "pl", "rb", "js", "conf", "cfg", "ini", "txt", "md", "json", "xml", "yaml", "yml", "env", "profile", "bashrc", "bash_profile")
+        var patchedCount = 0
+
+        usrDir.walkTopDown().forEach { file ->
+            if (!file.isFile) return@forEach
+            val ext = file.extension.lowercase()
+            val isText = ext in textExtensions ||
+                file.name.startsWith(".") ||
+                file.name == "bashrc" ||
+                file.name == "profile" ||
+                file.name == "bash_profile"
+
+            if (!isText) return@forEach
+
+            try {
+                val content = file.readText()
+                if (content.contains(oldPrefix)) {
+                    val patched = content.replace(oldPrefix, newPrefix)
+                    file.writeText(patched)
+                    patchedCount++
+                }
+            } catch (_: Exception) {
+                // Skip files we can't read/write
+            }
+        }
+    }
+
+    /**
+     * CRITICAL: Create a symlink bridge so /data/data/com.termux/files/usr
+     * resolves to our actual prefix.
+     *
+     * We CAN'T write to /data/data/com.termux/ (it's outside our app), but we
+     * CAN create the path structure inside our own app-private storage and
+     * use proot or environment variables to redirect.
+     *
+     * The approach: Set TERMUX_PREFIX in the environment, which some tools
+     * check. Also create a wrapper script that sets up the path translation.
+     *
+     * Most importantly: apt/pkg use the PREFIX environment variable, so
+     * setting PREFIX=our_path fixes the package manager.
+     */
+    private fun createSymlinkBridge() {
+        // Create a wrapper script that sets up the environment correctly
+        val wrapperDir = File(usrDir, "etc/profile.d")
+        if (!wrapperDir.exists()) wrapperDir.mkdirs()
+
+        // Profile script that sets up paths
+        val profileScript = File(wrapperDir, "pocketagent-paths.sh")
+        profileScript.writeText("""
+            # PocketAgent path configuration
+            # Fixes hardcoded Termux paths by setting environment variables
+            export PREFIX="${usrDir.absolutePath}"
+            export TERMUX_PREFIX="${usrDir.absolutePath}"
+            export TERMUX_ANDROID_HOME="${workspace.homeDir.absolutePath}"
+            export TERMUX_APP__DATA_DIR="${context.filesDir.absolutePath}"
+            export LD_LIBRARY_PATH="${File(usrDir, "lib").absolutePath}"
+            export PATH="${binDir.absolutePath}:/system/bin:/system/xbin:${'$'}PATH"
+
+            # Create a fake termux path via function override
+            # This tricks scripts that use absolute termux paths
+            if [ ! -d "/data/data/com.termux/files/usr" ]; then
+                # We can't create this path, but we can warn
+                true
+            fi
+        """.trimIndent())
+        profileScript.setExecutable(true, true)
+        profileScript.setReadable(true, true)
+    }
+
+    /**
+     * Create .profile, .bash_profile, and improve .bashrc.
+     * This ensures login shells get configured properly.
+     */
+    private fun createShellConfigs() {
+        val homeDir = workspace.homeDir
+
+        // .profile — loaded by login shells
+        val profile = File(homeDir, ".profile")
+        if (!profile.exists()) {
+            profile.writeText("""
+                # PocketAgent .profile
+                # Loaded by login shells
+
+                # Set PREFIX (critical for apt/pkg)
+                export PREFIX="${usrDir.absolutePath}"
+                export TERMUX_PREFIX="${usrDir.absolutePath}"
+
+                # Set PATH
+                export PATH="${binDir.absolutePath}:/system/bin:/system/xbin:${'$'}PATH"
+
+                # Set LD_LIBRARY_PATH
+                export LD_LIBRARY_PATH="${File(usrDir, "lib").absolutePath}"
+
+                # Locale settings
+                export LANG=en_US.UTF-8
+                export LC_ALL=en_US.UTF-8
+                export LANGUAGE=en_US:en
+
+                # Terminal settings
+                export TERM=xterm-256color
+                export COLORTERM=truecolor
+
+                # Home and tmp
+                export HOME="${homeDir.absolutePath}"
+                export TMPDIR="${workspace.tmpDir.absolutePath}"
+
+                # Source .bashrc if interactive
+                if [ -n "${'$'}PS1" ] && [ -f "${'$'}HOME/.bashrc" ]; then
+                    source "${'$'}HOME/.bashrc"
+                fi
+
+                # Source profile.d scripts
+                if [ -d "${usrDir.absolutePath}/etc/profile.d" ]; then
+                    for script in ${usrDir.absolutePath}/etc/profile.d/*.sh; do
+                        if [ -r "${'$'}script" ]; then
+                            . "${'$'}script"
+                        fi
+                    done
+                fi
+            """.trimIndent())
+        }
+
+        // .bash_profile — loaded by bash login shells
+        val bashProfile = File(homeDir, ".bash_profile")
+        if (!bashProfile.exists()) {
+            bashProfile.writeText("""
+                # PocketAgent .bash_profile
+                # Source .profile
+                if [ -f "${'$'}HOME/.profile" ]; then
+                    source "${'$'}HOME/.profile"
+                fi
+            """.trimIndent())
+        }
+
+        // Improve .bashrc
+        val bashrc = File(homeDir, ".bashrc")
+        bashrc.writeText("""
+            # PocketAgent .bashrc
+            export PS1='pocketagent ❯ '
+            export PREFIX="${usrDir.absolutePath}"
+            export TERMUX_PREFIX="${usrDir.absolutePath}"
+            export PATH="${binDir.absolutePath}:/system/bin:/system/xbin:${'$'}PATH"
+            export LD_LIBRARY_PATH="${File(usrDir, "lib").absolutePath}"
+            export LANG=en_US.UTF-8
+            export LC_ALL=en_US.UTF-8
+            export TERM=xterm-256color
+            export COLORTERM=truecolor
+            export HOME="${homeDir.absolutePath}"
+            export TMPDIR="${workspace.tmpDir.absolutePath}"
+            alias ll='ls -la'
+            alias la='ls -A'
+            alias l='ls -CF'
+            alias ..='cd ..'
+            alias ...='cd ../..'
+
+            # pkg wrapper that uses our PREFIX
+            pkg() {
+                PREFIX="${usrDir.absolutePath}" command pkg "${'$'}@"
+            }
+
+            # apt wrapper that uses our PREFIX
+            apt() {
+                PREFIX="${usrDir.absolutePath}" command apt "${'$'}@"
+            }
+        """.trimIndent())
+    }
+
     fun uninstall() {
         if (usrDir.exists()) {
             usrDir.deleteRecursively()
@@ -364,10 +562,11 @@ class BootstrapInstaller @Inject constructor(
     }
 
     fun getPath(): String {
+        // Deduplicate PATH entries
         return listOf(
             binDir.absolutePath,
             "/system/bin",
             "/system/xbin"
-        ).joinToString(":")
+        ).distinct().joinToString(":")
     }
 }

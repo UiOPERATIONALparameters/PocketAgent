@@ -32,7 +32,8 @@ data class AppSettings(
     val onboardingComplete: Boolean = false,
     val workspaceQuotaMb: Int = 2048,      // max MB for agent's ~/ dir
     val bashCommandTimeoutSec: Int = 30,
-    val systemPrompt: String = ""          // empty = use default from AgentLoop
+    val systemPrompt: String = "",          // empty = use default from AgentLoop
+    val maxToolIterations: Int = 30         // max tool calls per turn (5-100)
 ) {
     enum class ThemeMode { SYSTEM, LIGHT, DARK }
 }

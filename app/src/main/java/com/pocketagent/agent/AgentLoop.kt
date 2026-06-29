@@ -72,7 +72,7 @@ class AgentLoop @Inject constructor(
         modelId: String,
         messages: List<ChatMessage>,
         systemPrompt: String = DEFAULT_SYSTEM_PROMPT,
-        maxIterations: Int = 15
+        maxIterations: Int = 30
     ): Flow<Event> = flow {
         var currentMessages = mutableListOf<ChatMessage>().apply {
             add(ChatMessage(role = ChatMessage.Role.System, content = systemPrompt))
@@ -141,7 +141,21 @@ class AgentLoop @Inject constructor(
             }
 
             if (streamError != null) {
-                emit(Event(Event.Type.ERROR, error = streamError))
+                // Provide helpful messages for common errors
+                val helpfulError = when {
+                    streamError.contains("400", ignoreCase = true) && streamError.contains("image", ignoreCase = true) ->
+                        "This model doesn't support images. Please select a vision model (look for 'vision' badge in Settings). Error: $streamError"
+                    streamError.contains("400", ignoreCase = true) && streamError.contains("tool", ignoreCase = true) ->
+                        "This model may not support tool/function calling. Try a different model. Error: $streamError"
+                    streamError.contains("429") ->
+                        "Rate limit exceeded. Please wait a moment and try again. Error: $streamError"
+                    streamError.contains("401") || streamError.contains("403") ->
+                        "Authentication failed. Check your API key in Settings. Error: $streamError"
+                    streamError.contains("variants failed", ignoreCase = true) ->
+                        "The gateway couldn't process the request. This may be a temporary issue or the model may not support the request format. Error: $streamError"
+                    else -> streamError
+                }
+                emit(Event(Event.Type.ERROR, error = helpfulError))
                 return@flow
             }
 

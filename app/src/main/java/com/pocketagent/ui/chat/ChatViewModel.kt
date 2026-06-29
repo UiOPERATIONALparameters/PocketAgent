@@ -187,6 +187,10 @@ class ChatViewModel @Inject constructor(
             return
         }
 
+        // Note: Image attachments to non-vision models will cause API errors.
+        // The error is caught by the stream error handler and shown to the user.
+        // We could pre-check model vision support, but the model list isn't always available.
+
         viewModelScope.launch {
             // Create conversation if needed
             var conversationId = _state.value.conversationId
@@ -310,7 +314,8 @@ class ChatViewModel @Inject constructor(
                         provider = provider,
                         modelId = modelId,
                         messages = history,
-                        systemPrompt = settings.settings.value.systemPrompt.ifBlank { AgentLoop.DEFAULT_SYSTEM_PROMPT }
+                        systemPrompt = settings.settings.value.systemPrompt.ifBlank { AgentLoop.DEFAULT_SYSTEM_PROMPT },
+                        maxIterations = settings.settings.value.maxToolIterations
                     ).collect { event ->
                         when (event.type) {
                             AgentLoop.Event.Type.CONTENT_DELTA -> {

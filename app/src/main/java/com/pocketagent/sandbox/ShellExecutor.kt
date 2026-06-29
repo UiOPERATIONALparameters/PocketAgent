@@ -70,9 +70,10 @@ class ShellExecutor @Inject constructor(
             File(libDir, "libreadline.so.8").exists()
 
         // Choose shell command
+        // CRITICAL: Use --login so .profile is loaded (sets PREFIX for apt/pkg)
         val shellCommand: List<String> = if (canUseBootstrap && bootstrapPath != null) {
-            // Use bootstrap bash with proper library path
-            listOf(bootstrapPath, "-c", command)
+            // Use bootstrap bash with login flag so .profile is sourced
+            listOf(bootstrapPath, "--login", "-c", command)
         } else {
             // Fall back to Android's system shell
             listOf("/system/bin/sh", "-c", command)
