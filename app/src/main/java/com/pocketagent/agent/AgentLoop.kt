@@ -141,19 +141,21 @@ class AgentLoop @Inject constructor(
             }
 
             if (streamError != null) {
+                // Extract to local val for smart cast
+                val err = streamError
                 // Provide helpful messages for common errors
                 val helpfulError = when {
-                    streamError.contains("400", ignoreCase = true) && streamError.contains("image", ignoreCase = true) ->
-                        "This model doesn't support images. Please select a vision model (look for 'vision' badge in Settings). Error: $streamError"
-                    streamError.contains("400", ignoreCase = true) && streamError.contains("tool", ignoreCase = true) ->
-                        "This model may not support tool/function calling. Try a different model. Error: $streamError"
-                    streamError.contains("429") ->
-                        "Rate limit exceeded. Please wait a moment and try again. Error: $streamError"
-                    streamError.contains("401") || streamError.contains("403") ->
-                        "Authentication failed. Check your API key in Settings. Error: $streamError"
-                    streamError.contains("variants failed", ignoreCase = true) ->
-                        "The gateway couldn't process the request. This may be a temporary issue or the model may not support the request format. Error: $streamError"
-                    else -> streamError
+                    err.contains("400", ignoreCase = true) && err.contains("image", ignoreCase = true) ->
+                        "This model doesn't support images. Please select a vision model (look for 'vision' badge in Settings). Error: $err"
+                    err.contains("400", ignoreCase = true) && err.contains("tool", ignoreCase = true) ->
+                        "This model may not support tool/function calling. Try a different model. Error: $err"
+                    err.contains("429") ->
+                        "Rate limit exceeded. Please wait a moment and try again. Error: $err"
+                    err.contains("401") || err.contains("403") ->
+                        "Authentication failed. Check your API key in Settings. Error: $err"
+                    err.contains("variants failed", ignoreCase = true) ->
+                        "The gateway couldn't process the request. This may be a temporary issue or the model may not support the request format. Error: $err"
+                    else -> err
                 }
                 emit(Event(Event.Type.ERROR, error = helpfulError))
                 return@flow
