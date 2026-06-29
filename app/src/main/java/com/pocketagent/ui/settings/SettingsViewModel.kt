@@ -232,6 +232,34 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Verify the bootstrap installation and repair if needed.
+     */
+    fun verifyAndRepairBootstrap() {
+        viewModelScope.launch {
+            val error = withContext(Dispatchers.IO) {
+                // First try to repair permissions
+                bootstrapInstaller.repairPermissions()
+                // Then verify
+                bootstrapInstaller.verify()
+            }
+            if (error == null) {
+                _state.update {
+                    it.copy(
+                        bootstrapInstalled = true,
+                        bootstrapStatus = "Linux environment verified OK."
+                    )
+                }
+            } else {
+                _state.update {
+                    it.copy(
+                        bootstrapStatus = "Verification failed: $error\nTry removing and reinstalling."
+                    )
+                }
+            }
+        }
+    }
+
     fun clearAllKeys() {
         viewModelScope.launch {
             val providers = settingsRepository.providers.value

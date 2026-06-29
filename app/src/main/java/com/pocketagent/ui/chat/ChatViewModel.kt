@@ -225,21 +225,31 @@ class ChatViewModel @Inject constructor(
                     if (text.isNotEmpty()) {
                         parts.add(ChatMessage.ContentPart.Text(text))
                     }
+                    var attachErrors = mutableListOf<String>()
                     for (att in attachments) {
                         try {
                             val uri = android.net.Uri.parse(att.uri)
                             val bytes = appContext.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                            if (bytes != null) {
+                            if (bytes != null && bytes.isNotEmpty()) {
                                 val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
                                 parts.add(ChatMessage.ContentPart.Image(
                                     base64 = base64,
                                     mimeType = att.mimeType,
                                     detail = "auto"
                                 ))
+                            } else {
+                                attachErrors.add("Could not read image: ${att.displayName}")
                             }
-                        } catch (_: Exception) {}
+                        } catch (e: Exception) {
+                            attachErrors.add("Failed to process image ${att.displayName}: ${e.message}")
+                        }
                     }
-                    parts
+                    // If we couldn't load any images and no text, send an error message as text
+                    if (parts.isEmpty() && attachErrors.isNotEmpty()) {
+                        parts.add(ChatMessage.ContentPart.Text("[Image loading failed: ${attachErrors.joinToString("; ")}]"))
+                    }
+                    // Return null if no parts (shouldn't happen, but safety)
+                    if (parts.isEmpty()) null else parts
                 }
             }
 

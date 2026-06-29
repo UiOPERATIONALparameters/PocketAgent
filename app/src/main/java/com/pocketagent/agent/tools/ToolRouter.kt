@@ -1,6 +1,8 @@
 package com.pocketagent.agent.tools
 
 import com.pocketagent.llm.ToolSpec
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -8,6 +10,10 @@ import javax.inject.Singleton
 /**
  * Routes tool calls to their implementations.
  * All tools are injected via Hilt and registered here.
+ *
+ * CRITICAL: All tool execution is forced onto the IO dispatcher to prevent
+ * NetworkOnMainThreadException (web_fetch) and to keep the UI responsive
+ * (bash, file operations).
  */
 @Singleton
 class ToolRouter @Inject constructor(
@@ -37,9 +43,13 @@ class ToolRouter @Inject constructor(
         val tool = tools[toolName]
             ?: return ToolResult.Error("Unknown tool: $toolName")
         return try {
-            tool.execute(arguments)
+            // CRITICAL: Force IO dispatcher — prevents NetworkOnMainThreadException
+            // for web_fetch and keeps UI responsive for bash/file operations
+            withContext(Dispatchers.IO) {
+                tool.execute(arguments)
+            }
         } catch (e: Exception) {
-            ToolResult.Error("Tool execution failed: ${e.message}")
+            ToolResult.Error("Tool execution failed: ${e.message ?: e::class.simpleName}")
         }
     }
 }

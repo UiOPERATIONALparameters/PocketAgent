@@ -394,6 +394,24 @@ fun SettingsScreen(
                             }
                         }
                         Spacer(Modifier.height(8.dp))
+                        // Verify & Repair button
+                        Surface(
+                            onClick = {
+                                viewModel.verifyAndRepairBootstrap()
+                                Toast.makeText(context, "Verifying…", Toast.LENGTH_SHORT).show()
+                            },
+                            color = ext.accent.copy(alpha = 0.08f),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                "Verify & Repair",
+                                style = PocketType.BodyMedium,
+                                color = ext.accent,
+                                modifier = Modifier.padding(14.dp)
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
                         Surface(
                             onClick = {
                                 viewModel.uninstallBootstrap()

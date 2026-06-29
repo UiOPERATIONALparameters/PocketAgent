@@ -107,6 +107,14 @@ class BootstrapInstaller @Inject constructor(
                 return@withContext Result.failure(IOException("Failed to download bootstrap from all URLs. Last error: $lastError"))
             }
 
+            // Verify the downloaded zip is valid (not a partial download)
+            if (!zipFile.exists() || zipFile.length() < 1_000_000) {
+                // Bootstrap should be at least ~40MB. If it's smaller, it's likely
+                // a partial download from a network interruption.
+                zipFile.delete()
+                return@withContext Result.failure(IOException("Downloaded file is too small (${zipFile.length()} bytes) — likely a partial download. Please try again with a stable connection."))
+            }
+
             // Clean up any previous installation
             if (usrDir.exists()) {
                 usrDir.deleteRecursively()
@@ -115,7 +123,14 @@ class BootstrapInstaller @Inject constructor(
 
             // Extract
             onProgress(-1, -1)
-            extractZip(zipFile, usrDir)
+            try {
+                extractZip(zipFile, usrDir)
+            } catch (e: Exception) {
+                // Extraction failed — zip might be corrupt
+                zipFile.delete()
+                usrDir.deleteRecursively()
+                return@withContext Result.failure(IOException("Failed to extract bootstrap (zip may be corrupt): ${e.message}. Please try again."))
+            }
 
             // CRITICAL: Set executable permissions on ALL files in bin/
             // Some Android versions don't preserve permissions from zip
@@ -281,6 +296,71 @@ class BootstrapInstaller @Inject constructor(
         if (usrDir.exists()) {
             usrDir.deleteRecursively()
         }
+    }
+
+    /**
+     * Repair the installation by re-setting permissions on all binaries.
+     * Use this if bash exists but won't execute (permission issues).
+     */
+    fun repairPermissions() {
+        if (!usrDir.exists()) return
+
+        // Set executable on all bin/ files
+        if (binDir.exists()) {
+            binDir.listFiles()?.forEach { file ->
+                if (file.isFile) {
+                    file.setExecutable(true, true)
+                    file.setReadable(true, true)
+                }
+            }
+        }
+
+        // Set executable + readable on .so files
+        if (libDir.exists()) {
+            libDir.listFiles()?.forEach { file ->
+                if (file.isFile) {
+                    file.setExecutable(true, true)
+                    file.setReadable(true, true)
+                }
+            }
+        }
+
+        // Set readable on everything, executable on directories
+        usrDir.walkTopDown().forEach { file ->
+            file.setReadable(true, true)
+            if (file.isDirectory) {
+                file.setExecutable(true, true)
+            }
+        }
+    }
+
+    /**
+     * Verify the installation is complete and functional.
+     * Returns null if OK, or an error message describing what's wrong.
+     */
+    fun verify(): String? {
+        if (!usrDir.exists()) return "usr/ directory does not exist"
+        if (!binDir.exists()) return "usr/bin/ directory does not exist"
+        if (!bashPath.exists()) return "bash binary not found at ${bashPath.absolutePath}"
+        if (!bashPath.canExecute()) {
+            // Try to fix
+            bashPath.setExecutable(true, true)
+            if (!bashPath.canExecute()) return "bash binary exists but is not executable"
+        }
+        if (!libDir.exists()) return "usr/lib/ directory does not exist"
+        val soCount = libDir.listFiles { f -> f.name.endsWith(".so") }?.size ?: 0
+        if (soCount < 10) return "usr/lib/ has only $soCount .so files (expected 50+). Bootstrap may be incomplete."
+
+        // Check for critical libraries
+        val criticalLibs = listOf("libreadline.so.8", "libc++.so", "libandroid-support.so")
+        for (lib in criticalLibs) {
+            val libFile = File(libDir, lib)
+            if (!libFile.exists()) {
+                return "Critical library $lib not found. Bootstrap is incomplete."
+            }
+        }
+
+        return null  // All good
     }
 
     fun getPath(): String {

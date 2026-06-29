@@ -21,7 +21,7 @@ import javax.inject.Singleton
  *
  * CRITICAL: When using the bootstrap, LD_LIBRARY_PATH MUST be set to the
  * usr/lib directory. Without it, the dynamic linker can't find shared
- * libraries and every binary fails with "Permission denied" (EACCES/error 13).
+ * libraries (libreadline.so.8, libc++, etc.) and bash fails to start.
  */
 @Singleton
 class ShellExecutor @Inject constructor(
@@ -48,11 +48,33 @@ class ShellExecutor @Inject constructor(
         maxOutputBytes: Int = 256_000
     ): Result = withContext(Dispatchers.IO) {
         val start = System.currentTimeMillis()
+
+        // First, check if bootstrap is installed and bash is executable
         val bootstrapPath = bootstrapInstaller.getBashPath()
         val useBootstrap = bootstrapPath != null
 
-        // Choose shell: bootstrap bash if available, else /system/bin/sh
-        val shell = if (useBootstrap) {
+        // If bootstrap claims to be installed but bash isn't actually executable,
+        // verify and fall back to /system/bin/sh
+        val effectiveBootstrap = if (useBootstrap) {
+            val bashFile = File(bootstrapPath!!)
+            if (!bashFile.exists() || !bashFile.canExecute()) {
+                // Try to fix permissions
+                bashFile.setExecutable(true, true)
+                if (!bashFile.canExecute()) {
+                    // Fall back to system shell
+                    false
+                } else {
+                    true
+                }
+            } else {
+                true
+            }
+        } else {
+            false
+        }
+
+        // Choose shell
+        val shell = if (effectiveBootstrap) {
             listOf(bootstrapPath!!, "-c", command)
         } else {
             listOf("/system/bin/sh", "-c", command)
@@ -70,7 +92,7 @@ class ShellExecutor @Inject constructor(
         env["LC_ALL"] = "en_US.UTF-8"
         env["PWD"] = workspace.homeDir.absolutePath
 
-        if (useBootstrap) {
+        if (effectiveBootstrap) {
             val usrDir = bootstrapInstaller.usrDir
             val libDir = File(usrDir, "lib")
 
@@ -78,8 +100,14 @@ class ShellExecutor @Inject constructor(
             env["PATH"] = bootstrapInstaller.getPath()
 
             // CRITICAL: Set LD_LIBRARY_PATH so the dynamic linker finds shared libs
-            // Without this, every binary fails with "Permission denied" (error 13)
+            // Without this, bash fails with "libreadline.so.8 not found"
             env["LD_LIBRARY_PATH"] = libDir.absolutePath
+
+            // Also set LD_PRELOAD for termux-exec (path translation)
+            val termuxExec = File(libDir, "libtermux-exec.so")
+            if (termuxExec.exists()) {
+                env["LD_PRELOAD"] = termuxExec.absolutePath
+            }
 
             // Set PREFIX — Termux packages use this to find their root
             env["PREFIX"] = usrDir.absolutePath
@@ -98,10 +126,10 @@ class ShellExecutor @Inject constructor(
         } catch (e: IOException) {
             return@withContext Result(
                 stdout = "",
-                stderr = "Failed to start process: ${e.message}",
+                stderr = "Failed to start process: ${e.message}\n\nDiagnostic info:\n${bootstrapInstaller.getDiagnosticInfo()}",
                 exitCode = -1,
                 durationMs = System.currentTimeMillis() - start,
-                usedBootstrap = useBootstrap
+                usedBootstrap = effectiveBootstrap
             )
         }
 
@@ -125,17 +153,23 @@ class ShellExecutor @Inject constructor(
                 exitCode = -1,
                 durationMs = System.currentTimeMillis() - start,
                 timedOut = true,
-                usedBootstrap = useBootstrap
+                usedBootstrap = effectiveBootstrap
             )
         } else {
             val (stdout, stderr, exitCode) = timedOut
+            // If bash failed to start, append diagnostic info
+            val enrichedStderr = if (exitCode != 0 && effectiveBootstrap && stderr.contains("not found", ignoreCase = true)) {
+                "$stderr\n\n--- Diagnostic Info ---\n${bootstrapInstaller.getDiagnosticInfo()}"
+            } else {
+                stderr
+            }
             Result(
                 stdout = stdout.first,
-                stderr = stderr.first,
+                stderr = enrichedStderr,
                 exitCode = exitCode,
                 durationMs = System.currentTimeMillis() - start,
                 truncated = stdout.second || stderr.second,
-                usedBootstrap = useBootstrap
+                usedBootstrap = effectiveBootstrap
             )
         }
     }
