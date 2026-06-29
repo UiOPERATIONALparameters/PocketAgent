@@ -339,6 +339,22 @@ private fun ModelStep(
 
         Spacer(Modifier.height(16.dp))
 
+        // Error display (if save failed)
+        if (state.testError != null) {
+            Surface(
+                color = ext.error.copy(alpha = 0.1f),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+            ) {
+                Text(
+                    text = state.testError,
+                    style = PocketType.BodySmall,
+                    color = ext.error,
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
+        }
+
         // Search bar
         OutlinedTextField(
             value = search,
@@ -419,24 +435,35 @@ private fun ModelStep(
 
         Spacer(Modifier.height(12.dp))
 
-        // Finish button
+        // Finish button — shows saving indicator while saving
+        val canFinish = state.selectedModelId != null && !state.saving
         Surface(
-            color = if (state.selectedModelId != null) ext.accent else ext.surfaceSubtle,
+            color = if (canFinish) ext.accent else ext.surfaceSubtle,
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(onClick = { if (state.selectedModelId != null) onFinish() })
+                .clickable(onClick = { if (canFinish) onFinish() })
         ) {
             Row(
                 modifier = Modifier.padding(16.dp),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    "Start using PocketAgent",
-                    style = PocketType.BodyMedium,
-                    color = if (state.selectedModelId != null) ext.textOnAccent else ext.textTertiary
-                )
+                if (state.saving) {
+                    CircularProgressIndicator(
+                        color = ext.textOnAccent,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    Text("Saving…", style = PocketType.BodyMedium, color = ext.textOnAccent)
+                } else {
+                    Text(
+                        "Start using PocketAgent",
+                        style = PocketType.BodyMedium,
+                        color = if (state.selectedModelId != null) ext.textOnAccent else ext.textTertiary
+                    )
+                }
             }
         }
     }

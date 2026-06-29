@@ -17,6 +17,7 @@ import com.pocketagent.ui.chat.ChatScreen
 import com.pocketagent.ui.chat.ChatViewModel
 import com.pocketagent.ui.files.FileBrowserScreen
 import com.pocketagent.ui.files.FileBrowserViewModel
+import com.pocketagent.ui.onboarding.OnboardingEvent
 import com.pocketagent.ui.onboarding.OnboardingScreen
 import com.pocketagent.ui.onboarding.OnboardingViewModel
 import com.pocketagent.ui.settings.SettingsScreen
@@ -55,6 +56,24 @@ fun PocketApp() {
                         composable(Routes.ONBOARDING) {
                             val vm: OnboardingViewModel = hiltViewModel()
                             val s by vm.state.collectAsStateWithLifecycle()
+
+                            // Listen for navigation events — ensures save completes before nav
+                            LaunchedEffect(Unit) {
+                                vm.events.collect { event ->
+                                    when (event) {
+                                        is OnboardingEvent.NavigateToChat -> {
+                                            rootViewModel.completeOnboarding()
+                                            nav.navigate(Routes.CHAT) {
+                                                popUpTo(Routes.ONBOARDING) { inclusive = true }
+                                            }
+                                        }
+                                        is OnboardingEvent.ShowError -> {
+                                            // Error is shown via state.testError, no navigation
+                                        }
+                                    }
+                                }
+                            }
+
                             OnboardingScreen(
                                 state = s,
                                 onGatewayUrlChange = vm::onGatewayUrlChange,
@@ -63,10 +82,8 @@ fun PocketApp() {
                                 onTestConnection = vm::testConnection,
                                 onSelectModel = vm::selectModel,
                                 onFinish = {
-                                    rootViewModel.completeOnboarding()
-                                    nav.navigate(Routes.CHAT) {
-                                        popUpTo(Routes.ONBOARDING) { inclusive = true }
-                                    }
+                                    // CRITICAL: Actually call finish() — this saves the provider
+                                    vm.finish()
                                 }
                             )
                         }
@@ -78,7 +95,7 @@ fun PocketApp() {
                                 onOpenSettings = { nav.navigate(Routes.SETTINGS) },
                                 onOpenFiles = { nav.navigate(Routes.FILES) },
                                 onNewConversation = {
-                                    // Just clear state, don't navigate
+                                    // Already on a new chat — just clear state
                                     vm.newConversation()
                                 },
                                 onOpenConversation = { id ->
@@ -101,15 +118,9 @@ fun PocketApp() {
                                 onOpenSettings = { nav.navigate(Routes.SETTINGS) },
                                 onOpenFiles = { nav.navigate(Routes.FILES) },
                                 onNewConversation = {
-                                    // Pop back to CHAT (no ID) route
-                                    nav.popBackStack(Routes.CHAT, inclusive = false)
-                                    // If CHAT wasn't on the stack, navigate to it
-                                    if (nav.currentDestination?.route != Routes.CHAT) {
-                                        nav.navigate(Routes.CHAT) {
-                                            popUpTo(Routes.CHAT) { inclusive = true }
-                                        }
-                                    } else {
-                                        vm.newConversation()
+                                    // Navigate to plain CHAT route (no ID)
+                                    nav.navigate(Routes.CHAT) {
+                                        popUpTo(Routes.CHAT) { inclusive = true }
                                     }
                                 },
                                 onOpenConversation = { id ->

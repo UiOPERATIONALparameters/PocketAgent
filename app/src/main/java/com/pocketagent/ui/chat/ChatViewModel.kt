@@ -178,12 +178,12 @@ class ChatViewModel @Inject constructor(
 
         val provider = activeProviderHolder.get()
         if (provider == null) {
-            _state.update { it.copy(error = "No provider configured. Open Settings.") }
+            _state.update { it.copy(error = "No provider configured. Tap Settings to add your API key.") }
             return
         }
         val modelId = settings.settings.value.activeModelId
         if (modelId == null) {
-            _state.update { it.copy(error = "No model selected. Open Settings.") }
+            _state.update { it.copy(error = "No model selected. Tap Settings to pick a model.") }
             return
         }
 

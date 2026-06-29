@@ -30,6 +30,27 @@ class RootViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.load()
             val s = settingsRepository.settings.value
+            val provider = settingsRepository.getActiveProvider()
+
+            // MIGRATION FIX: If onboarding was marked complete (e.g. from v0.2.0 bug
+            // where finish() was never called) but no provider is saved, reset
+            // onboarding so the user goes through it again.
+            if (s.onboardingComplete && provider == null) {
+                settingsRepository.updateSettings { it.copy(onboardingComplete = false) }
+                _state.update {
+                    it.copy(
+                        loading = false,
+                        onboardingComplete = false,
+                        darkTheme = when (s.themeMode) {
+                            AppSettings.ThemeMode.LIGHT -> false
+                            AppSettings.ThemeMode.DARK -> true
+                            AppSettings.ThemeMode.SYSTEM -> it.darkTheme
+                        }
+                    )
+                }
+                return@launch
+            }
+
             _state.update {
                 it.copy(
                     loading = false,

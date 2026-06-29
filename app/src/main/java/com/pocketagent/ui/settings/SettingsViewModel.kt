@@ -159,7 +159,12 @@ class SettingsViewModel @Inject constructor(
             try {
                 val models = withContext(Dispatchers.IO) { providerHolder.forConfig(provider).listModels() }
                 _state.update { it.copy(availableModels = models) }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                // Don't silently swallow — set a subtle error so user knows why models are empty
+                _state.update {
+                    it.copy(testResult = "Couldn't fetch models: ${e.message ?: e::class.simpleName}")
+                }
+            }
         }
     }
 
