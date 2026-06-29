@@ -19,8 +19,8 @@ android {
         // execution of files from writable directories like /data/data/<pkg>/files/.
         // Termux uses the same approach. Since we sideload (not Play Store), this is safe.
         targetSdk = 28
-        versionCode = 9
-        versionName = "0.8.0"
+        versionCode = 10
+        versionName = "0.9.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

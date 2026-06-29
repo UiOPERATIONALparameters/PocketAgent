@@ -96,8 +96,27 @@ fun ChatScreen(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
+            try {
+                // Persist permission so we can read the URI later
+                val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(uri, flags)
+            } catch (_: Exception) {
+                // Some content providers don't support persistable permissions — that's OK
+            }
             val mimeType = context.contentResolver.getType(uri) ?: "image/*"
-            val displayName = uri.lastPathSegment ?: "image"
+            // Try to get a real display name from the content resolver
+            val displayName = try {
+                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (nameIdx >= 0 && cursor.moveToFirst()) {
+                        cursor.getString(nameIdx)
+                    } else {
+                        "image_${System.currentTimeMillis()}.jpg"
+                    }
+                } ?: "image_${System.currentTimeMillis()}.jpg"
+            } catch (_: Exception) {
+                "image_${System.currentTimeMillis()}.jpg"
+            }
             viewModel.addAttachment(uri.toString(), mimeType, displayName)
         }
     }
@@ -187,10 +206,19 @@ fun ChatScreen(
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                // Show image icon + name
+                                Icon(
+                                    Icons.Filled.AttachFile,
+                                    contentDescription = null,
+                                    tint = extendedColors().accent,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(6.dp))
                                 Text(
-                                    att.displayName.take(20),
+                                    att.displayName.take(24),
                                     style = PocketType.LabelSmall,
-                                    color = extendedColors().textPrimary
+                                    color = extendedColors().textPrimary,
+                                    maxLines = 1
                                 )
                                 Spacer(Modifier.width(4.dp))
                                 Icon(
@@ -213,6 +241,7 @@ fun ChatScreen(
                 onStop = viewModel::stopAgent,
                 onAttach = { imagePicker.launch("image/*") },
                 isRunning = state.isAgentRunning,
+                hasAttachments = state.pendingAttachments.isNotEmpty(),
                 modifier = Modifier.fillMaxWidth()
             )
         }
@@ -643,6 +672,7 @@ private fun ChatComposer(
     onStop: () -> Unit,
     onAttach: () -> Unit,
     isRunning: Boolean,
+    hasAttachments: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val ext = extendedColors()
@@ -696,8 +726,8 @@ private fun ChatComposer(
                 maxLines = 6
             )
             Spacer(Modifier.width(8.dp))
-            // Send button
-            val canSend = text.isNotBlank() && !isRunning
+            // Send button — enabled when there's text OR attachments
+            val canSend = (text.isNotBlank() || hasAttachments) && !isRunning
             IconButton(
                 onClick = { if (isRunning) onStop() else onSend() },
                 modifier = Modifier

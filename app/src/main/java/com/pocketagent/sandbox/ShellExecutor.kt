@@ -1,6 +1,7 @@
 package com.pocketagent.sandbox
 
 import android.content.Context
+import android.os.Build
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -15,13 +16,21 @@ import javax.inject.Singleton
 /**
  * Spawns a bash/sh process to execute commands in the agent's workspace.
  *
- * If the Termux bootstrap is installed, uses the bootstrap's bash (full Linux
- * userland: apt install, python, node, ffmpeg, git, etc.).
- * Otherwise, falls back to Android's built-in /system/bin/sh (basic POSIX).
+ * CRITICAL ANDROID LINKER FIX:
+ * Android's dynamic linker (linker64) is the SYSTEM linker at /system/bin/linker64.
+ * When you spawn a binary from app-private storage (like our Termux bootstrap bash),
+ * the system linker doesn't know about usr/lib/ — it only searches system library paths.
+ * Setting LD_LIBRARY_PATH in the environment doesn't reliably work on all Android versions
+ * because the linker reads it at a specific point in its initialization.
  *
- * CRITICAL: When using the bootstrap, LD_LIBRARY_PATH MUST be set to the
- * usr/lib directory. Without it, the dynamic linker can't find shared
- * libraries (libreadline.so.8, libc++, etc.) and bash fails to start.
+ * The reliable solution (used by Termux): invoke the binary THROUGH the dynamic linker
+ * with an explicit --library-path argument. This forces the linker to search our lib dir.
+ *
+ * Command: /system/bin/linker64 --library-path=/data/.../usr/lib /data/.../usr/bin/bash -c "command"
+ *
+ * However, directly invoking linker64 requires root on newer Android. So we use a fallback chain:
+ * 1. Try with LD_LIBRARY_PATH + LD_PRELOAD set (works on most devices)
+ * 2. If that fails, fall back to /system/bin/sh (Android's mksh — basic but works)
  */
 @Singleton
 class ShellExecutor @Inject constructor(
@@ -49,38 +58,27 @@ class ShellExecutor @Inject constructor(
     ): Result = withContext(Dispatchers.IO) {
         val start = System.currentTimeMillis()
 
-        // First, check if bootstrap is installed and bash is executable
         val bootstrapPath = bootstrapInstaller.getBashPath()
-        val useBootstrap = bootstrapPath != null
+        val libDir = File(bootstrapInstaller.usrDir, "lib")
+        val termuxExec = File(libDir, "libtermux-exec.so")
 
-        // If bootstrap claims to be installed but bash isn't actually executable,
-        // verify and fall back to /system/bin/sh
-        val effectiveBootstrap = if (useBootstrap) {
-            val bashFile = File(bootstrapPath!!)
-            if (!bashFile.exists() || !bashFile.canExecute()) {
-                // Try to fix permissions
-                bashFile.setExecutable(true, true)
-                if (!bashFile.canExecute()) {
-                    // Fall back to system shell
-                    false
-                } else {
-                    true
-                }
-            } else {
-                true
-            }
-        } else {
-            false
-        }
+        // Verify bootstrap is actually usable
+        val canUseBootstrap = bootstrapPath != null &&
+            File(bootstrapPath).exists() &&
+            File(bootstrapPath).canExecute() &&
+            libDir.exists() &&
+            File(libDir, "libreadline.so.8").exists()
 
-        // Choose shell
-        val shell = if (effectiveBootstrap) {
-            listOf(bootstrapPath!!, "-c", command)
+        // Choose shell command
+        val shellCommand: List<String> = if (canUseBootstrap && bootstrapPath != null) {
+            // Use bootstrap bash with proper library path
+            listOf(bootstrapPath, "-c", command)
         } else {
+            // Fall back to Android's system shell
             listOf("/system/bin/sh", "-c", command)
         }
 
-        val pb = ProcessBuilder(shell)
+        val pb = ProcessBuilder(shellCommand)
             .directory(workspace.homeDir)
             .redirectErrorStream(false)
 
@@ -92,19 +90,16 @@ class ShellExecutor @Inject constructor(
         env["LC_ALL"] = "en_US.UTF-8"
         env["PWD"] = workspace.homeDir.absolutePath
 
-        if (effectiveBootstrap) {
+        if (canUseBootstrap && bootstrapPath != null) {
             val usrDir = bootstrapInstaller.usrDir
-            val libDir = File(usrDir, "lib")
 
             // CRITICAL: Set PATH to include bootstrap bin first
             env["PATH"] = bootstrapInstaller.getPath()
 
-            // CRITICAL: Set LD_LIBRARY_PATH so the dynamic linker finds shared libs
-            // Without this, bash fails with "libreadline.so.8 not found"
+            // CRITICAL: Set LD_LIBRARY_PATH — the dynamic linker searches here for shared libs
             env["LD_LIBRARY_PATH"] = libDir.absolutePath
 
-            // Also set LD_PRELOAD for termux-exec (path translation)
-            val termuxExec = File(libDir, "libtermux-exec.so")
+            // Set LD_PRELOAD for termux-exec (path translation)
             if (termuxExec.exists()) {
                 env["LD_PRELOAD"] = termuxExec.absolutePath
             }
@@ -124,12 +119,13 @@ class ShellExecutor @Inject constructor(
         val process = try {
             pb.start()
         } catch (e: IOException) {
+            val diag = bootstrapInstaller.getDiagnosticInfo()
             return@withContext Result(
                 stdout = "",
-                stderr = "Failed to start process: ${e.message}\n\nDiagnostic info:\n${bootstrapInstaller.getDiagnosticInfo()}",
+                stderr = "Failed to start process: ${e.message}\n\nDiagnostic info:\n$diag",
                 exitCode = -1,
                 durationMs = System.currentTimeMillis() - start,
-                usedBootstrap = effectiveBootstrap
+                usedBootstrap = canUseBootstrap
             )
         }
 
@@ -153,7 +149,7 @@ class ShellExecutor @Inject constructor(
                 exitCode = -1,
                 durationMs = System.currentTimeMillis() - start,
                 timedOut = true,
-                usedBootstrap = effectiveBootstrap
+                usedBootstrap = canUseBootstrap
             )
         } else {
             val stdoutPair = timedOut.first
@@ -161,19 +157,95 @@ class ShellExecutor @Inject constructor(
             val exitCode = timedOut.third
             val stdoutStr = stdoutPair.first
             val stderrStr = stderrPair.first
-            // If bash failed to start, append diagnostic info
-            val enrichedStderr = if (exitCode != 0 && effectiveBootstrap && stderrStr.contains("not found", ignoreCase = true)) {
-                "$stderrStr\n\n--- Diagnostic Info ---\n${bootstrapInstaller.getDiagnosticInfo()}"
-            } else {
-                stderrStr
+
+            // If bash failed to start (exit 127 or 255 with library errors),
+            // try running with /system/bin/sh as fallback and note the issue
+            var finalStdout = stdoutStr
+            var finalStderr = stderrStr
+            var finalUsedBootstrap = canUseBootstrap
+
+            if (exitCode != 0 && canUseBootstrap && (
+                stderrStr.contains("not found", ignoreCase = true) ||
+                stderrStr.contains("Permission denied", ignoreCase = true) ||
+                stderrStr.contains("No such file", ignoreCase = true) ||
+                exitCode == 127 || exitCode == 255
+            )) {
+                // Bootstrap bash failed — try system shell as fallback
+                val fallbackResult = trySystemShell(command, timeoutSec, maxOutputBytes, start)
+                if (fallbackResult.isSuccess) {
+                    finalStdout = fallbackResult.stdout + "\n\n[Note: Bootstrap bash failed, used system shell. Run 'Verify & Repair' in Settings → Linux Environment.]"
+                    finalStderr = stderrStr  // keep original error for context
+                    finalUsedBootstrap = false
+                } else {
+                    // Both failed — append diagnostic info
+                    finalStderr = stderrStr + "\n\n--- Diagnostic Info ---\n${bootstrapInstaller.getDiagnosticInfo()}"
+                }
             }
+
             Result(
-                stdout = stdoutStr,
-                stderr = enrichedStderr,
+                stdout = finalStdout,
+                stderr = finalStderr,
                 exitCode = exitCode,
                 durationMs = System.currentTimeMillis() - start,
                 truncated = stdoutPair.second || stderrPair.second,
-                usedBootstrap = effectiveBootstrap
+                usedBootstrap = finalUsedBootstrap
+            )
+        }
+    }
+
+    /**
+     * Fallback: run the command with Android's system shell.
+     */
+    private suspend fun trySystemShell(
+        command: String,
+        timeoutSec: Int,
+        maxOutputBytes: Int,
+        start: Long
+    ): Result = withContext(Dispatchers.IO) {
+        val pb = ProcessBuilder("/system/bin/sh", "-c", command)
+            .directory(workspace.homeDir)
+            .redirectErrorStream(false)
+
+        val env = pb.environment()
+        env["HOME"] = workspace.homeDir.absolutePath
+        env["TERM"] = "xterm-256color"
+        env["PATH"] = "/system/bin:/system/xbin:${env["PATH"] ?: ""}"
+
+        val process = try {
+            pb.start()
+        } catch (e: IOException) {
+            return@withContext Result(
+                stdout = "",
+                stderr = "System shell also failed: ${e.message}",
+                exitCode = -1,
+                durationMs = System.currentTimeMillis() - start
+            )
+        }
+
+        val result = withTimeoutOrNull((timeoutSec * 1000L)) {
+            coroutineScope {
+                val stdoutJob = async { readStream(process.inputStream, maxOutputBytes) }
+                val stderrJob = async { readStream(process.errorStream, maxOutputBytes) }
+                Triple(stdoutJob.await(), stderrJob.await(), process.waitFor())
+            }
+        }
+
+        if (result == null) {
+            process.destroyForcibly()
+            Result(
+                stdout = "",
+                stderr = "Timed out",
+                exitCode = -1,
+                durationMs = System.currentTimeMillis() - start,
+                timedOut = true
+            )
+        } else {
+            Result(
+                stdout = result.first.first,
+                stderr = result.second.first,
+                exitCode = result.third,
+                durationMs = System.currentTimeMillis() - start,
+                truncated = result.first.second || result.second.second
             )
         }
     }
