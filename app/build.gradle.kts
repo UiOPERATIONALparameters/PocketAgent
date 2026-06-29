@@ -38,8 +38,6 @@ android {
             )
             // Sign with debug for v0.1.0 simplicity; CI can override with release keystore
             signingConfig = signingConfigs.getByName("debug")
-            // Disable lint vital check — we intentionally use targetSdk 28 for W^X exemption
-            isLintVitalRelease = false
         }
         debug {
             isMinifyEnabled = false
@@ -60,6 +58,13 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    // Disable lint fatal checks — we intentionally use targetSdk 28 for W^X exemption
+    // (Android 10+ blocks executing binaries from app-private storage at targetSdk 29+)
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = false
     }
 
     packaging {
