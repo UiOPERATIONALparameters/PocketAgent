@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -324,11 +325,7 @@ private fun AssistantBubble(text: String, reasoning: String?) {
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = { expanded = !expanded }
-                    )
+                    .clickable(onClick = { expanded = !expanded })
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -455,11 +452,7 @@ private fun ToolCallCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(end = 32.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = { expanded = !expanded }
-            )
+            .clickable(onClick = { expanded = !expanded })
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -600,11 +593,7 @@ private fun SidebarOverlay(
                     border = androidx.compose.foundation.BorderStroke(1.dp, ext.divider),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = onNewConversation
-                        )
+                        .clickable(onClick = onNewConversation)
                 ) {
                     Row(
                         modifier = Modifier.padding(12.dp),
@@ -636,11 +625,7 @@ private fun SidebarOverlay(
                                 .background(
                                     if (conv.id == activeConversationId) ext.surfaceSubtle else Color.Transparent
                                 )
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
-                                    onClick = { onConversationClick(conv.id) }
-                                )
+                                .clickable(onClick = { onConversationClick(conv.id) })
                                 .padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -672,11 +657,7 @@ private fun SidebarOverlay(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onClose
-                )
+                .clickable(onClick = onClose)
         )
     }
 }

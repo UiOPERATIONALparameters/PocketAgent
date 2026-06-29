@@ -156,7 +156,7 @@ class FileWriteTool @Inject constructor(
         }
 
         // Quota check (2GB default)
-        val projectedBytes = if (append) file.length() + content.toByteArray().size else content.toByteArray().size
+        val projectedBytes = (if (append) file.length() + content.toByteArray().size else content.toByteArray().size).toLong()
         if (workspace.wouldExceedQuota(projectedBytes, 2048)) {
             return ToolResult.Error("Workspace quota exceeded")
         }
@@ -227,8 +227,13 @@ class FileListTool @Inject constructor(
         }
 
         val entries = mutableListOf<JsonObject>()
-        val walk = if (recursive) dir.walkTopDown() else dir.listFiles()?.toList() ?: emptyList()
-        val limited = walk.take(500)  // hard cap
+        val walk: Sequence<java.io.File> = if (recursive) {
+            dir.walkTopDown()
+        } else {
+            (dir.listFiles()?.toList() ?: emptyList()).asSequence()
+        }
+        val limited = walk.take(500).toList()  // hard cap
+        var truncated = false
         for (f in limited) {
             val rel = dir.toPath().relativize(f.toPath()).toString()
             if (rel.isEmpty()) continue
@@ -239,6 +244,7 @@ class FileListTool @Inject constructor(
                 put("modified", JsonPrimitive(f.lastModified()))
             })
         }
+        truncated = walk.take(501).count() > 500
 
         val output = buildJsonObject {
             put("path", pathStr)
@@ -246,7 +252,7 @@ class FileListTool @Inject constructor(
             // Use a JsonArray of the entry objects
             val arr = JsonArray(entries)
             put("items", arr)
-            put("truncated", JsonPrimitive(limited.count() == 500))
+            put("truncated", JsonPrimitive(truncated))
         }
         return ToolResult.Success(output, "Listed ${entries.size} entries in $pathStr")
     }

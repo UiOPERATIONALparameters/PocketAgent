@@ -126,11 +126,7 @@ private fun WelcomeStep(onContinue: () -> Unit) {
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onContinue
-                )
+                .clickable(onClick = onContinue)
         ) {
             Row(
                 modifier = Modifier.padding(16.dp),
@@ -267,11 +263,7 @@ private fun ProviderStep(
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onTestConnection
-                )
+                .clickable(onClick = onTestConnection)
         ) {
             Row(
                 modifier = Modifier.padding(16.dp),
@@ -385,11 +377,7 @@ private fun ModelStep(
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = { onSelectModel(model.id) }
-                        )
+                        .clickable(onClick = { onSelectModel(model.id) })
                 ) {
                     Row(
                         modifier = Modifier.padding(12.dp),
@@ -436,11 +424,7 @@ private fun ModelStep(
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = { if (state.selectedModelId != null) onFinish() }
-                )
+                .clickable(onClick = { if (state.selectedModelId != null) onFinish() })
         ) {
             Row(
                 modifier = Modifier.padding(16.dp),

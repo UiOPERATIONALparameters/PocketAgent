@@ -4,14 +4,14 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.runtime.collectAsState
+import androidx.activity.compose.setContent
+import androidx.compose.runtime.getValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import androidx.lifecycle.lifecycleScope
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pocketagent.ui.PocketApp
 import com.pocketagent.ui.RootViewModel
 import dagger.hilt.android.AndroidEntryPoint
-import androidx.activity.compose.setContent
-import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -31,8 +31,8 @@ class MainActivity : ComponentActivity() {
         splash.setKeepOnScreenCondition { keepSplash }
 
         setContent {
-            val rootVm: RootViewModel = androidx.hilt.navigation.compose.hiltViewModel()
-            val state by rootVm.state.collectAsState()
+            val rootVm: RootViewModel = hiltViewModel()
+            val state by rootVm.state.collectAsStateWithLifecycle()
             keepSplash = state.loading
             PocketApp()
         }

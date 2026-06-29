@@ -11,6 +11,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -135,11 +136,11 @@ class OpenAICompatibleProvider(
                 channel.close()
             }
 
-            override fun onFailure(eventSource: EventSource, t: Throwable, response: Response?) {
+            override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                 val body = try { response?.body?.string() } catch (_: Exception) { null }
                 val msg = buildString {
                     append("Stream failed: ")
-                    append(t.message ?: t::class.simpleName)
+                    append(t?.message ?: t?.let { it::class.simpleName } ?: "unknown error")
                     if (response != null) {
                         append(" (HTTP ${response.code}")
                         if (body != null) append(": $body")
@@ -209,7 +210,7 @@ class OpenAICompatibleProvider(
     private fun buildPayload(request: LlmRequest, stream: Boolean): String {
         val messagesArray = buildJsonArray {
             for (msg in request.messages) {
-                addJsonObject {
+                add(buildJsonObject {
                     put("role", when (msg.role) {
                         ChatMessage.Role.System -> "system"
                         ChatMessage.Role.User -> "user"
@@ -222,18 +223,18 @@ class OpenAICompatibleProvider(
                     if (msg.toolCalls.isNotEmpty()) {
                         putJsonArray("tool_calls") {
                             for (tc in msg.toolCalls) {
-                                addJsonObject {
+                                add(buildJsonObject {
                                     put("id", tc.id)
                                     put("type", "function")
                                     putJsonObject("function") {
                                         put("name", tc.name)
                                         put("arguments", tc.arguments)
                                     }
-                                }
+                                })
                             }
                         }
                     }
-                }
+                })
             }
         }
 
@@ -247,14 +248,14 @@ class OpenAICompatibleProvider(
             if (request.tools.isNotEmpty()) {
                 putJsonArray("tools") {
                     for (tool in request.tools) {
-                        addJsonObject {
+                        add(buildJsonObject {
                             put("type", "function")
                             putJsonObject("function") {
                                 put("name", tool.name)
                                 put("description", tool.description)
                                 put("parameters", json.parseToJsonElement(tool.parameters))
                             }
-                        }
+                        })
                     }
                 }
             }

@@ -141,11 +141,7 @@ fun SettingsScreen(
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
                                 .weight(1f)
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
-                                    onClick = { viewModel.save(); viewModel.testConnection() }
-                                )
+                                .clickable(onClick = { viewModel.save(); viewModel.testConnection() })
                         ) {
                             Row(
                                 modifier = Modifier.padding(14.dp),
@@ -166,14 +162,15 @@ fun SettingsScreen(
                             }
                         }
                     }
-                    if (state.testResult != null) {
-                        val isError = state.testResult.startsWith("Failed")
+                    val testResult = state.testResult
+                    if (testResult != null) {
+                        val isError = testResult.startsWith("Failed")
                         Surface(
                             color = if (isError) ext.error.copy(alpha = 0.1f) else ext.success.copy(alpha = 0.1f),
                             shape = RoundedCornerShape(8.dp)
                         ) {
                             Text(
-                                text = state.testResult,
+                                text = testResult,
                                 style = PocketType.BodySmall,
                                 color = if (isError) ext.error else ext.success,
                                 modifier = Modifier.padding(12.dp)
@@ -233,11 +230,7 @@ fun SettingsScreen(
                                     ),
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable(
-                                            interactionSource = remember { MutableInteractionSource() },
-                                            indication = null,
-                                            onClick = { viewModel.selectModel(model.id) }
-                                        )
+                                        .clickable(onClick = { viewModel.selectModel(model.id) })
                                 ) {
                                     Row(
                                         modifier = Modifier.padding(10.dp),
@@ -286,11 +279,7 @@ fun SettingsScreen(
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                                onClick = viewModel::clearAllKeys
-                            )
+                            .clickable(onClick = viewModel::clearAllKeys)
                     ) {
                         Text(
                             "Clear All Keys & Reset",

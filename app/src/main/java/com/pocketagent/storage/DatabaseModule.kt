@@ -25,7 +25,7 @@ object DatabaseModule {
             PocketDatabase::class.java,
             PocketDatabase.NAME
         )
-            .fallbackToDestructiveMigration(true)
+            .fallbackToDestructiveMigration()
             .build()
 
     @Provides
