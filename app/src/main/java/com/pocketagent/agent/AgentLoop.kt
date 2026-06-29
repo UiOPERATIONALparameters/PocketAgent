@@ -141,8 +141,8 @@ class AgentLoop @Inject constructor(
             }
 
             if (streamError != null) {
-                // Extract to local val for smart cast
-                val err = streamError
+                // Extract to non-null local val
+                val err: String = streamError!!
                 // Provide helpful messages for common errors
                 val helpfulError = when {
                     err.contains("400", ignoreCase = true) && err.contains("image", ignoreCase = true) ->
