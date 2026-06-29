@@ -2,34 +2,32 @@ package com.pocketagent.service
 
 import android.app.Notification
 import android.app.PendingIntent
+import android.app.Service
 import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
-import androidx.lifecycle.LifecycleService
-import androidx.lifecycle.lifecycleScope
 import com.pocketagent.MainActivity
 import com.pocketagent.R
 import com.pocketagent.util.NotificationChannels
 import com.pocketagent.util.NotificationIds
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.launch
 
 /**
  * Foreground service that keeps the agent running when the app is backgrounded.
  * Shows a persistent notification while the agent is active.
  *
- * The agent loop itself runs via coroutineScope tied to this service's lifecycle.
+ * The agent loop itself is driven by the ChatViewModel; this service just
+ * keeps the process alive while long-running tool calls complete.
  */
 @AndroidEntryPoint
-class AgentForegroundService : LifecycleService() {
+class AgentForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        super.onStartCommand(intent, flags, startId)
         startForeground(NotificationIds.AGENT_FOREGROUND, buildNotification("Agent working…"))
-        // The agent loop itself is driven by the ChatViewModel; this service just
-        // keeps the process alive while long-running tool calls complete.
         return START_NOT_STICKY
     }
+
+    override fun onBind(intent: Intent?): android.os.IBinder? = null
 
     private fun buildNotification(text: String): Notification {
         val intent = Intent(this, MainActivity::class.java).apply {

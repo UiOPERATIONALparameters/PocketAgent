@@ -20,7 +20,7 @@ import java.util.UUID
 import javax.inject.Inject
 
 data class OnboardingState(
-    val step: OnboardingStep = OnboardingStep.WELCOME,
+    val step: OnboardingStep = OnboardingStep.PROVIDER,
     val providerName: String = "My Gateway",
     val gatewayUrl: String = "https://api.gateway.orgn.com/v1",
     val apiKey: String = "",
