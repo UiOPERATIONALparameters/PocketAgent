@@ -3,6 +3,7 @@ package com.pocketagent.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.pocketagent.llm.ModelInfo
+import com.pocketagent.sandbox.BootstrapInstaller
 import com.pocketagent.storage.ActiveProviderHolder
 import com.pocketagent.storage.prefs.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -27,13 +28,19 @@ data class SettingsUiState(
     val versionName: String = com.pocketagent.BuildConfig.VERSION_NAME,
     val systemPrompt: String = "",
     val bashTimeoutSec: Int = 30,
-    val workspaceQuotaMb: Int = 2048
+    val workspaceQuotaMb: Int = 2048,
+    // Bootstrap (Termux) state
+    val bootstrapInstalled: Boolean = false,
+    val bootstrapInstalling: Boolean = false,
+    val bootstrapProgress: Float = 0f,  // 0..1
+    val bootstrapStatus: String = ""
 )
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
-    private val providerHolder: ActiveProviderHolder
+    private val providerHolder: ActiveProviderHolder,
+    private val bootstrapInstaller: BootstrapInstaller
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsUiState())
@@ -54,7 +61,8 @@ class SettingsViewModel @Inject constructor(
                         activeModelId = s.activeModelId,
                         systemPrompt = s.systemPrompt,
                         bashTimeoutSec = s.bashCommandTimeoutSec,
-                        workspaceQuotaMb = s.workspaceQuotaMb
+                        workspaceQuotaMb = s.workspaceQuotaMb,
+                        bootstrapInstalled = bootstrapInstaller.isInstalled()
                     )
                 }
                 refreshModels()
@@ -63,7 +71,8 @@ class SettingsViewModel @Inject constructor(
                     it.copy(
                         systemPrompt = s.systemPrompt,
                         bashTimeoutSec = s.bashCommandTimeoutSec,
-                        workspaceQuotaMb = s.workspaceQuotaMb
+                        workspaceQuotaMb = s.workspaceQuotaMb,
+                        bootstrapInstalled = bootstrapInstaller.isInstalled()
                     )
                 }
             }
@@ -77,10 +86,6 @@ class SettingsViewModel @Inject constructor(
     fun onBashTimeoutChange(sec: Int) = _state.update { it.copy(bashTimeoutSec = sec) }
     fun onWorkspaceQuotaChange(mb: Int) = _state.update { it.copy(workspaceQuotaMb = mb) }
 
-    /**
-     * Save provider config and update active provider ID.
-     * Suspends until complete.
-     */
     suspend fun save() {
         val s = _state.value
         val id = s.providerId ?: java.util.UUID.randomUUID().toString()
@@ -95,9 +100,6 @@ class SettingsViewModel @Inject constructor(
         _state.update { it.copy(providerId = id) }
     }
 
-    /**
-     * Save + Test in one call. Properly chained.
-     */
     fun saveAndTest() {
         _state.update { it.copy(testing = true, testResult = null) }
         viewModelScope.launch {
@@ -160,10 +162,72 @@ class SettingsViewModel @Inject constructor(
                 val models = withContext(Dispatchers.IO) { providerHolder.forConfig(provider).listModels() }
                 _state.update { it.copy(availableModels = models) }
             } catch (e: Exception) {
-                // Don't silently swallow — set a subtle error so user knows why models are empty
                 _state.update {
                     it.copy(testResult = "Couldn't fetch models: ${e.message ?: e::class.simpleName}")
                 }
+            }
+        }
+    }
+
+    /**
+     * Download and install the Termux bootstrap (~50MB).
+     * Gives the AI full Linux: apt install, python, node, git, ffmpeg, etc.
+     */
+    fun installBootstrap() {
+        if (_state.value.bootstrapInstalling) return
+        _state.update {
+            it.copy(
+                bootstrapInstalling = true,
+                bootstrapProgress = 0f,
+                bootstrapStatus = "Downloading Linux environment (50MB)…"
+            )
+        }
+        viewModelScope.launch {
+            val result = bootstrapInstaller.install { downloaded, total ->
+                if (total > 0) {
+                    val pct = downloaded.toFloat() / total
+                    _state.update {
+                        it.copy(
+                            bootstrapProgress = pct,
+                            bootstrapStatus = "Downloading… ${(pct * 100).toInt()}%"
+                        )
+                    }
+                } else if (downloaded > 0) {
+                    _state.update {
+                        it.copy(
+                            bootstrapStatus = "Extracting… ${(downloaded / 1024 / 1024)}MB"
+                        )
+                    }
+                }
+            }
+            if (result.isSuccess) {
+                _state.update {
+                    it.copy(
+                        bootstrapInstalling = false,
+                        bootstrapInstalled = true,
+                        bootstrapProgress = 1f,
+                        bootstrapStatus = "Linux environment installed! The AI now has full Linux access."
+                    )
+                }
+            } else {
+                _state.update {
+                    it.copy(
+                        bootstrapInstalling = false,
+                        bootstrapStatus = "Failed: ${result.exceptionOrNull()?.message ?: "unknown error"}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun uninstallBootstrap() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { bootstrapInstaller.uninstall() }
+            _state.update {
+                it.copy(
+                    bootstrapInstalled = false,
+                    bootstrapStatus = "Linux environment removed."
+                )
             }
         }
     }
@@ -178,7 +242,8 @@ class SettingsViewModel @Inject constructor(
                     versionName = com.pocketagent.BuildConfig.VERSION_NAME,
                     systemPrompt = it.systemPrompt,
                     bashTimeoutSec = it.bashTimeoutSec,
-                    workspaceQuotaMb = it.workspaceQuotaMb
+                    workspaceQuotaMb = it.workspaceQuotaMb,
+                    bootstrapInstalled = it.bootstrapInstalled
                 )
             }
         }

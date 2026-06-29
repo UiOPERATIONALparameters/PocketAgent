@@ -370,6 +370,115 @@ fun SettingsScreen(
                     )
                 }
 
+                // Linux Environment section
+                Section(title = "Linux Environment") {
+                    if (state.bootstrapInstalled) {
+                        // Installed state
+                        Surface(
+                            color = ext.success.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    "Full Linux installed",
+                                    style = PocketType.BodyMedium,
+                                    color = ext.success
+                                )
+                                Text(
+                                    "The AI now has: bash, python3, node, git, curl, wget, apt/pkg, and more.",
+                                    style = PocketType.BodySmall,
+                                    color = ext.textSecondary,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Surface(
+                            onClick = {
+                                viewModel.uninstallBootstrap()
+                                Toast.makeText(context, "Linux environment removed", Toast.LENGTH_SHORT).show()
+                            },
+                            color = ext.error.copy(alpha = 0.08f),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                "Remove Linux Environment",
+                                style = PocketType.BodyMedium,
+                                color = ext.error,
+                                modifier = Modifier.padding(14.dp)
+                            )
+                        }
+                    } else if (state.bootstrapInstalling) {
+                        // Installing state
+                        Surface(
+                            color = ext.accent.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    state.bootstrapStatus,
+                                    style = PocketType.BodyMedium,
+                                    color = ext.accent
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                // Progress bar
+                                androidx.compose.material3.LinearProgressIndicator(
+                                    progress = { state.bootstrapProgress },
+                                    color = ext.accent,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    } else {
+                        // Not installed state
+                        Surface(
+                            color = ext.surfaceSubtle,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    "Install Full Linux Environment",
+                                    style = PocketType.BodyMedium,
+                                    color = ext.textPrimary
+                                )
+                                Text(
+                                    "Downloads ~50MB one-time. Gives the AI: python3, node, git, curl, wget, apt install, and hundreds of Linux packages.",
+                                    style = PocketType.BodySmall,
+                                    color = ext.textSecondary,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Surface(
+                            onClick = { viewModel.installBootstrap() },
+                            color = ext.accent,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(14.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Install Linux", style = PocketType.BodyMedium, color = ext.textOnAccent)
+                            }
+                        }
+                        if (state.bootstrapStatus.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                state.bootstrapStatus,
+                                style = PocketType.BodySmall,
+                                color = ext.error
+                            )
+                        }
+                    }
+                }
+
                 // About section
                 Section(title = "About") {
                     Row(

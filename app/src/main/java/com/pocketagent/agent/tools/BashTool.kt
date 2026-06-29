@@ -32,11 +32,13 @@ class BashTool @Inject constructor(
     override val name = "bash"
     override val description = """
         Run a bash command in the agent's workspace (~/).
-        The workspace is a private directory on the user's phone.
-        Available commands: cd, ls, cat, echo, mkdir, rm, cp, mv, ln, chmod,
-        find, grep, sed, awk, head, tail, wc, sort, uniq, tr, cut, etc.
-        No package manager (apt/pip/node) in v0.1.
-        Commands run with a 30-second timeout by default.
+        The workspace is a private Linux environment on the user's phone.
+        Available commands include: cd, ls, cat, echo, mkdir, rm, cp, mv, ln, chmod,
+        find, grep, sed, awk, head, tail, wc, sort, uniq, tr, cut, curl, wget, git,
+        python3, node, npm, pip, tar, gzip, unzip, and many more.
+        You can install additional packages with: pkg install <package> or apt install <package>
+        The workspace has 'projects', 'tmp', and 'downloads' subdirectories.
+        Commands run with a configurable timeout (default 30s, max 120s).
     """.trimIndent()
 
     override val parametersSchema = """
