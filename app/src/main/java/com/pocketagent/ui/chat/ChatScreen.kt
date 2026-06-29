@@ -129,24 +129,7 @@ fun ChatScreen(
                     onNewConversation()
                 },
                 onOpenSettings = onOpenSettings,
-                onOpenFiles = onOpenFiles,
-                onExport = {
-                    viewModel.exportConversation { markdown ->
-                        if (markdown != null) {
-                            // Share via Android share sheet
-                            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                                type = "text/markdown"
-                                putExtra(android.content.Intent.EXTRA_SUBJECT, state.title)
-                                putExtra(android.content.Intent.EXTRA_TEXT, markdown)
-                            }
-                            val chooser = android.content.Intent.createChooser(intent, "Export Conversation")
-                            chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                            context.startActivity(chooser)
-                        } else {
-                            Toast.makeText(context, "No conversation to export", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                }
+                onOpenFiles = onOpenFiles
             )
 
             // Messages list
@@ -255,6 +238,23 @@ fun ChatScreen(
                 },
                 onDeleteConversation = viewModel::deleteConversation,
                 onRenameConversation = viewModel::renameConversation,
+                onExportConversation = { id ->
+                    viewModel.closeSidebar()
+                    viewModel.exportConversationForId(id) { markdown ->
+                        if (markdown != null) {
+                            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                type = "text/markdown"
+                                putExtra(android.content.Intent.EXTRA_SUBJECT, "Conversation")
+                                putExtra(android.content.Intent.EXTRA_TEXT, markdown)
+                            }
+                            val chooser = android.content.Intent.createChooser(intent, "Export Conversation")
+                            chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            context.startActivity(chooser)
+                        } else {
+                            Toast.makeText(context, "Could not export", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
                 onClose = viewModel::closeSidebar
             )
         }
@@ -279,8 +279,7 @@ private fun ChatTopBar(
     onMenuClick: () -> Unit,
     onNewChat: () -> Unit,
     onOpenSettings: () -> Unit,
-    onOpenFiles: () -> Unit,
-    onExport: () -> Unit = {}
+    onOpenFiles: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -304,13 +303,6 @@ private fun ChatTopBar(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
-        IconButton(onClick = onExport) {
-            Icon(
-                imageVector = Icons.Filled.IosShare,
-                contentDescription = "Export",
-                tint = extendedColors().textPrimary
-            )
-        }
         IconButton(onClick = onOpenFiles) {
             Icon(
                 imageVector = Icons.Filled.Folder,
@@ -731,6 +723,7 @@ private fun SidebarOverlay(
     onNewConversation: () -> Unit,
     onDeleteConversation: (String) -> Unit,
     onRenameConversation: (String, String) -> Unit,
+    onExportConversation: (String) -> Unit,
     onClose: () -> Unit
 ) {
     val ext = extendedColors()
@@ -822,6 +815,21 @@ private fun SidebarOverlay(
                                 Icon(
                                     imageVector = Icons.Filled.Edit,
                                     contentDescription = "Rename",
+                                    tint = ext.textTertiary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            // Export button
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .clickable(onClick = { onExportConversation(conv.id) }),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.IosShare,
+                                    contentDescription = "Export",
                                     tint = ext.textTertiary,
                                     modifier = Modifier.size(16.dp)
                                 )

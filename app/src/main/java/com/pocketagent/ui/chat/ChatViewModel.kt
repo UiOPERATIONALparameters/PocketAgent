@@ -72,7 +72,7 @@ data class ChatUiState(
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
-    @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
     private val conversationDao: ConversationDao,
     private val messageDao: MessageDao,
     private val toolRunDao: ToolRunDao,
@@ -228,7 +228,7 @@ class ChatViewModel @Inject constructor(
                     for (att in attachments) {
                         try {
                             val uri = android.net.Uri.parse(att.uri)
-                            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                            val bytes = appContext.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                             if (bytes != null) {
                                 val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
                                 parts.add(ChatMessage.ContentPart.Image(
@@ -289,6 +289,10 @@ class ChatViewModel @Inject constructor(
             val pendingToolCalls = mutableMapOf<String, PendingToolCall>()
             // Track the current iteration's assistant message ID (for tool_calls persistence)
             var currentAssistantMsgId: String? = null
+
+            // Start foreground service to keep the app alive when backgrounded.
+            // This prevents "stream was reset" errors when the user minimizes the app.
+            startAgentService(text.ifEmpty { "Working…" })
 
             agentJob = viewModelScope.launch {
                 try {
@@ -456,6 +460,7 @@ class ChatViewModel @Inject constructor(
                                         activeToolName = null
                                     )
                                 }
+                                stopAgentService()
                             }
                             AgentLoop.Event.Type.ERROR -> {
                                 _state.update {
@@ -468,6 +473,7 @@ class ChatViewModel @Inject constructor(
                                         error = event.error
                                     )
                                 }
+                                stopAgentService()
                             }
                         }
                     }
@@ -486,6 +492,35 @@ class ChatViewModel @Inject constructor(
     fun stopAgent() {
         agentJob?.cancel()
         _state.update { it.copy(isAgentRunning = false, activeToolName = null) }
+        stopAgentService()
+    }
+
+    /**
+     * Start the foreground service to keep the app alive when backgrounded.
+     */
+    private fun startAgentService(statusText: String) {
+        try {
+            val intent = android.content.Intent(appContext, com.pocketagent.service.AgentForegroundService::class.java)
+            intent.putExtra("status_text", statusText)
+            appContext.startService(intent)
+        } catch (_: Exception) {
+            // Foreground service might fail on some devices — not critical
+        }
+    }
+
+    /**
+     * Stop the foreground service.
+     */
+    private fun stopAgentService() {
+        try {
+            val intent = android.content.Intent(appContext, com.pocketagent.service.AgentForegroundService::class.java)
+            appContext.stopService(intent)
+        } catch (_: Exception) {}
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        stopAgentService()
     }
 
     /**
@@ -603,6 +638,67 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             val result = exportConversation()
             onResult(result)
+        }
+    }
+
+    /**
+     * Export a specific conversation by ID (for sidebar export).
+     */
+    fun exportConversationForId(conversationId: String, onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            val messages = withContext(Dispatchers.IO) {
+                messageDao.getForConversation(conversationId)
+            }
+            val conv = conversationDao.getById(conversationId)
+            if (conv == null) {
+                onResult(null)
+                return@launch
+            }
+            val sb = StringBuilder()
+            sb.appendLine("# ${conv.title}")
+            sb.appendLine()
+            sb.appendLine("_Exported from PocketAgent on ${java.text.SimpleDateFormat("MMM d, yyyy 'at' HH:mm", java.util.Locale.getDefault()).format(java.util.Date())}_")
+            sb.appendLine()
+            sb.appendLine("---")
+            sb.appendLine()
+            for (msg in messages) {
+                when (msg.role) {
+                    "user" -> {
+                        sb.appendLine("## You")
+                        sb.appendLine()
+                        sb.appendLine(msg.content ?: "")
+                        sb.appendLine()
+                    }
+                    "assistant" -> {
+                        sb.appendLine("## PocketAgent")
+                        sb.appendLine()
+                        if (!msg.reasoning.isNullOrEmpty()) {
+                            sb.appendLine("<details><summary>Reasoning</summary>")
+                            sb.appendLine()
+                            sb.appendLine("```")
+                            sb.appendLine(msg.reasoning)
+                            sb.appendLine("```")
+                            sb.appendLine()
+                            sb.appendLine("</details>")
+                            sb.appendLine()
+                        }
+                        sb.appendLine(msg.content ?: "")
+                        sb.appendLine()
+                    }
+                    "tool" -> {
+                        val toolName = msg.toolName ?: "tool"
+                        sb.appendLine("<details><summary>Tool: $toolName</summary>")
+                        sb.appendLine()
+                        sb.appendLine("```")
+                        sb.appendLine(msg.content ?: "")
+                        sb.appendLine("```")
+                        sb.appendLine()
+                        sb.appendLine("</details>")
+                        sb.appendLine()
+                    }
+                }
+            }
+            onResult(sb.toString())
         }
     }
 

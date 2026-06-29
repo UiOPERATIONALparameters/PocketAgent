@@ -14,9 +14,13 @@ android {
     defaultConfig {
         applicationId = "com.pocketagent"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 7
-        versionName = "0.6.0"
+        // CRITICAL: targetSdk 28 is required for executing binaries from app-private
+        // storage. Android 10+ (API 29+) enforces W^X (Write XOR Execute) which blocks
+        // execution of files from writable directories like /data/data/<pkg>/files/.
+        // Termux uses the same approach. Since we sideload (not Play Store), this is safe.
+        targetSdk = 28
+        versionCode = 8
+        versionName = "0.7.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
