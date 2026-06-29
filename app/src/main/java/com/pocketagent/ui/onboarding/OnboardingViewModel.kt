@@ -42,6 +42,25 @@ class OnboardingViewModel @Inject constructor(
     private val _state = MutableStateFlow(OnboardingState())
     val state: StateFlow<OnboardingState> = _state.asStateFlow()
 
+    init {
+        viewModelScope.launch {
+            // load() is idempotent — safe to call from any ViewModel
+            settingsRepository.load()
+            // If there's an existing provider, pre-fill the fields
+            val existing = settingsRepository.getActiveProvider()
+            if (existing != null) {
+                _state.update {
+                    it.copy(
+                        providerName = existing.displayName,
+                        gatewayUrl = existing.baseUrl,
+                        apiKey = existing.apiKey,
+                        savedProvider = existing
+                    )
+                }
+            }
+        }
+    }
+
     fun onProviderNameChange(name: String) {
         _state.update { it.copy(providerName = name) }
     }

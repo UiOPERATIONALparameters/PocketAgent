@@ -1,7 +1,9 @@
 package com.pocketagent.ui.chat
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -12,92 +14,95 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pocketagent.design.PocketType
 import com.pocketagent.design.extendedColors
 import com.pocketagent.design.softShadow
-import kotlinx.coroutines.launch
 
 @Composable
 fun ChatScreen(
     viewModel: ChatViewModel,
     onOpenSettings: () -> Unit,
-    onNewConversation: (String) -> Unit,
+    onOpenFiles: () -> Unit,
+    onNewConversation: () -> Unit,
     onOpenConversation: (String) -> Unit
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    // Image picker for vision attachments
+    val imagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val mimeType = context.contentResolver.getType(uri) ?: "image/*"
+            val displayName = uri.lastPathSegment ?: "image"
+            viewModel.addAttachment(uri.toString(), mimeType, displayName)
+        }
+    }
 
     // Auto-scroll to bottom on new messages
-    LaunchedEffect(state.messages.size, state.streamingContent) {
-        if (state.messages.isNotEmpty() || state.streamingContent.isNotEmpty()) {
-            val target = if (state.streamingContent.isNotEmpty()) state.messages.size else state.messages.size - 1
-            if (target >= 0) {
-                listState.animateScrollToItem(target.coerceAtLeast(0))
-            }
+    LaunchedEffect(state.messages.size, state.streamingContent, state.streamingToolCalls.size) {
+        val target = state.messages.size + (if (state.streamingContent.isNotEmpty() || state.streamingToolCalls.isNotEmpty()) 1 else 0) - 1
+        if (target >= 0) {
+            listState.animateScrollToItem(target.coerceAtLeast(0))
         }
     }
 
@@ -116,10 +121,11 @@ fun ChatScreen(
                 title = state.title,
                 onMenuClick = viewModel::toggleSidebar,
                 onNewChat = {
-                    val id = viewModel.newConversation()
-                    onNewConversation(id)
+                    viewModel.newConversation()
+                    onNewConversation()
                 },
-                onOpenSettings = onOpenSettings
+                onOpenSettings = onOpenSettings,
+                onOpenFiles = onOpenFiles
             )
 
             // Messages list
@@ -131,25 +137,62 @@ fun ChatScreen(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth(),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     items(state.messages, key = { it.id }) { msg ->
                         ChatMessageItem(msg)
                     }
                     // Streaming message
-                    if (state.isAgentRunning && state.streamingContent.isNotEmpty()) {
+                    if (state.isAgentRunning && (state.streamingContent.isNotEmpty() || state.streamingReasoning.isNotEmpty() || state.streamingToolCalls.isNotEmpty())) {
                         item {
                             StreamingMessage(
                                 content = state.streamingContent,
                                 reasoning = state.streamingReasoning,
+                                toolCalls = state.streamingToolCalls,
                                 activeToolName = state.activeToolName
                             )
                         }
                     }
                     // If agent is running but no content yet, show thinking indicator
-                    if (state.isAgentRunning && state.streamingContent.isEmpty() && state.streamingReasoning.isEmpty() && state.activeToolName == null) {
+                    if (state.isAgentRunning && state.streamingContent.isEmpty() && state.streamingReasoning.isEmpty() && state.streamingToolCalls.isEmpty()) {
                         item { ThinkingIndicator() }
+                    }
+                }
+            }
+
+            // Pending attachments preview
+            if (state.pendingAttachments.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    state.pendingAttachments.forEach { att ->
+                        Surface(
+                            color = extendedColors().surfaceSubtle,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.clickable(onClick = { viewModel.removeAttachment(att.uri) })
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    att.displayName.take(20),
+                                    style = PocketType.LabelSmall,
+                                    color = extendedColors().textPrimary
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Icon(
+                                    Icons.Filled.Close,
+                                    contentDescription = "Remove",
+                                    tint = extendedColors().textSecondary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -160,6 +203,7 @@ fun ChatScreen(
                 onTextChange = viewModel::onInputTextChange,
                 onSend = viewModel::sendMessage,
                 onStop = viewModel::stopAgent,
+                onAttach = { imagePicker.launch("image/*") },
                 isRunning = state.isAgentRunning,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -180,9 +224,9 @@ fun ChatScreen(
                     onOpenConversation(id)
                 },
                 onNewConversation = {
-                    val id = viewModel.newConversation()
+                    viewModel.newConversation()
                     viewModel.closeSidebar()
-                    onNewConversation(id)
+                    onNewConversation()
                 },
                 onDeleteConversation = viewModel::deleteConversation,
                 onClose = viewModel::closeSidebar
@@ -208,7 +252,8 @@ private fun ChatTopBar(
     title: String,
     onMenuClick: () -> Unit,
     onNewChat: () -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    onOpenFiles: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -232,6 +277,13 @@ private fun ChatTopBar(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
+        IconButton(onClick = onOpenFiles) {
+            Icon(
+                imageVector = Icons.Filled.Folder,
+                contentDescription = "Files",
+                tint = extendedColors().textPrimary
+            )
+        }
         IconButton(onClick = onNewChat) {
             Icon(
                 imageVector = Icons.Filled.Add,
@@ -355,12 +407,14 @@ private fun AssistantBubble(text: String, reasoning: String?) {
             Spacer(Modifier.height(8.dp))
         }
         // Content
-        Text(
-            text = text,
-            style = PocketType.Body,
-            color = extendedColors().bubbleAgentText,
-            modifier = Modifier.padding(horizontal = 4.dp)
-        )
+        if (text.isNotEmpty()) {
+            Text(
+                text = text,
+                style = PocketType.Body,
+                color = extendedColors().bubbleAgentText,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+        }
     }
 }
 
@@ -368,6 +422,7 @@ private fun AssistantBubble(text: String, reasoning: String?) {
 private fun StreamingMessage(
     content: String,
     reasoning: String,
+    toolCalls: List<ChatUiState.VisibleToolCall>,
     activeToolName: String?
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(end = 32.dp)) {
@@ -381,7 +436,18 @@ private fun StreamingMessage(
                     .alpha(0.7f)
             )
         }
-        if (activeToolName != null) {
+        // Streaming tool calls
+        toolCalls.forEach { tc ->
+            ToolCallCard(
+                toolName = tc.toolName,
+                arguments = tc.arguments,
+                result = tc.result,
+                display = tc.result,
+                isRunning = tc.isRunning
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+        if (activeToolName != null && toolCalls.isEmpty()) {
             Text(
                 text = "Calling $activeToolName…",
                 style = PocketType.LabelSmall,
@@ -439,9 +505,10 @@ private fun ToolCallCard(
     toolName: String,
     arguments: String?,
     result: String?,
-    display: String?
+    display: String?,
+    isRunning: Boolean = false
 ) {
-    var expanded by remember { mutableStateOf(false) }
+    var expanded by remember(toolName, arguments, result) { mutableStateOf(false) }
     Surface(
         color = extendedColors().toolCardBg,
         shape = RoundedCornerShape(12.dp),
@@ -451,7 +518,6 @@ private fun ToolCallCard(
         ),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(end = 32.dp)
             .clickable(onClick = { expanded = !expanded })
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
@@ -462,6 +528,14 @@ private fun ToolCallCard(
                     color = extendedColors().accent,
                     fontWeight = FontWeight.SemiBold
                 )
+                if (isRunning) {
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "running…",
+                        style = PocketType.LabelSmall,
+                        color = extendedColors().textTertiary
+                    )
+                }
                 Spacer(Modifier.weight(1f))
                 Icon(
                     imageVector = Icons.Filled.ChevronRight,
@@ -497,6 +571,7 @@ private fun ChatComposer(
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
+    onAttach: () -> Unit,
     isRunning: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -513,8 +588,17 @@ private fun ChatComposer(
                 .imePadding(),
             verticalAlignment = Alignment.Bottom
         ) {
+            // Attach button
+            IconButton(onClick = onAttach, modifier = Modifier.size(44.dp)) {
+                Icon(
+                    imageVector = Icons.Filled.AttachFile,
+                    contentDescription = "Attach image",
+                    tint = ext.textSecondary
+                )
+            }
+            Spacer(Modifier.width(4.dp))
             // Input field with rounded shape (Kimi's 24dp signature)
-            androidx.compose.material3.TextField(
+            TextField(
                 value = text,
                 onValueChange = onTextChange,
                 placeholder = {
@@ -529,7 +613,7 @@ private fun ChatComposer(
                     .weight(1f)
                     .heightIn(min = 48.dp, max = 160.dp),
                 shape = RoundedCornerShape(24.dp),
-                colors = androidx.compose.material3.TextFieldDefaults.colors(
+                colors = TextFieldDefaults.colors(
                     focusedContainerColor = ext.surfaceSubtle,
                     unfocusedContainerColor = ext.surfaceSubtle,
                     disabledContainerColor = ext.surfaceSubtle,
@@ -538,7 +622,7 @@ private fun ChatComposer(
                     disabledIndicatorColor = Color.Transparent,
                     cursorColor = ext.accent
                 ),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+                keyboardOptions = KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Default),
                 maxLines = 6
             )
             Spacer(Modifier.width(8.dp))
@@ -572,6 +656,12 @@ private fun SidebarOverlay(
 ) {
     val ext = extendedColors()
     Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f))) {
+        // Click-outside catcher
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(onClick = onClose)
+        )
         Surface(
             color = ext.bg,
             modifier = Modifier
@@ -626,7 +716,7 @@ private fun SidebarOverlay(
                                     if (conv.id == activeConversationId) ext.surfaceSubtle else Color.Transparent
                                 )
                                 .clickable(onClick = { onConversationClick(conv.id) })
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                                .padding(start = 12.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
@@ -637,9 +727,13 @@ private fun SidebarOverlay(
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f)
                             )
-                            IconButton(
-                                onClick = { onDeleteConversation(conv.id) },
-                                modifier = Modifier.size(24.dp)
+                            // Delete button — wrapped in Box to consume clicks
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .clickable(onClick = { onDeleteConversation(conv.id) }),
+                                contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = Icons.Filled.Delete,
@@ -653,12 +747,6 @@ private fun SidebarOverlay(
                 }
             }
         }
-        // Click-outside to close
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clickable(onClick = onClose)
-        )
     }
 }
 
@@ -682,7 +770,7 @@ private fun ErrorBanner(message: String, onDismiss: () -> Unit) {
             )
             IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
                 Icon(
-                    imageVector = Icons.Filled.Delete,
+                    imageVector = Icons.Filled.Close,
                     contentDescription = "Dismiss",
                     tint = Color.White
                 )
@@ -690,5 +778,3 @@ private fun ErrorBanner(message: String, onDismiss: () -> Unit) {
         }
     }
 }
-
-

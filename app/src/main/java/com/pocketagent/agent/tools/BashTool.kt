@@ -64,8 +64,10 @@ class BashTool @Inject constructor(
             ?: return ToolResult.Error("Arguments must be a JSON object")
         val command = obj["command"]?.jsonPrimitive?.content
             ?: return ToolResult.Error("Missing 'command' parameter")
-        val timeout = (obj["timeout"]?.jsonPrimitive?.intOrNull ?: 30)
-            .coerceIn(1, 120)
+        // Use user-configured timeout as the default; model can override up to it
+        val userMaxTimeout = settings.settings.value.bashCommandTimeoutSec
+        val requestedTimeout = obj["timeout"]?.jsonPrimitive?.intOrNull ?: userMaxTimeout
+        val timeout = requestedTimeout.coerceIn(1, userMaxTimeout.coerceAtLeast(120))
 
         val result = shell.execute(command, timeoutSec = timeout)
 

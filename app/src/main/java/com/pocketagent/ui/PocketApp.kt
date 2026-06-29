@@ -4,7 +4,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.graphics.Color
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavType
@@ -16,6 +15,8 @@ import com.pocketagent.design.PocketTheme
 import com.pocketagent.design.extendedColors
 import com.pocketagent.ui.chat.ChatScreen
 import com.pocketagent.ui.chat.ChatViewModel
+import com.pocketagent.ui.files.FileBrowserScreen
+import com.pocketagent.ui.files.FileBrowserViewModel
 import com.pocketagent.ui.onboarding.OnboardingScreen
 import com.pocketagent.ui.onboarding.OnboardingViewModel
 import com.pocketagent.ui.settings.SettingsScreen
@@ -23,11 +24,12 @@ import com.pocketagent.ui.settings.SettingsViewModel
 
 object Routes {
     const val ONBOARDING = "onboarding"
-    const val CHAT_LIST = "chat_list"
-    const val CHAT = "chat/{conversationId}"
+    const val CHAT = "chat"
+    const val CHAT_WITH_ID = "chat/{conversationId}"
     const val SETTINGS = "settings"
+    const val FILES = "files"
 
-    fun chat(conversationId: String) = "chat/$conversationId"
+    fun chatWithId(conversationId: String) = "chat/$conversationId"
 }
 
 @Composable
@@ -48,7 +50,7 @@ fun PocketApp() {
                     // Splash screen keeps visible; nothing to render yet
                 }
                 else -> {
-                    val startDest = if (state.onboardingComplete) Routes.CHAT_LIST else Routes.ONBOARDING
+                    val startDest = if (state.onboardingComplete) Routes.CHAT else Routes.ONBOARDING
                     NavHost(navController = nav, startDestination = startDest) {
                         composable(Routes.ONBOARDING) {
                             val vm: OnboardingViewModel = hiltViewModel()
@@ -62,27 +64,31 @@ fun PocketApp() {
                                 onSelectModel = vm::selectModel,
                                 onFinish = {
                                     rootViewModel.completeOnboarding()
-                                    nav.navigate(Routes.CHAT_LIST) {
+                                    nav.navigate(Routes.CHAT) {
                                         popUpTo(Routes.ONBOARDING) { inclusive = true }
                                     }
                                 }
                             )
                         }
-                        composable(Routes.CHAT_LIST) {
+                        // Chat without conversation ID — shows new/empty chat
+                        composable(Routes.CHAT) {
                             val vm: ChatViewModel = hiltViewModel()
                             ChatScreen(
                                 viewModel = vm,
                                 onOpenSettings = { nav.navigate(Routes.SETTINGS) },
-                                onNewConversation = { id ->
-                                    nav.navigate(Routes.chat(id))
+                                onOpenFiles = { nav.navigate(Routes.FILES) },
+                                onNewConversation = {
+                                    // Just clear state, don't navigate
+                                    vm.newConversation()
                                 },
                                 onOpenConversation = { id ->
-                                    nav.navigate(Routes.chat(id))
+                                    nav.navigate(Routes.chatWithId(id))
                                 }
                             )
                         }
+                        // Chat with specific conversation ID — loads existing
                         composable(
-                            route = Routes.CHAT,
+                            route = Routes.CHAT_WITH_ID,
                             arguments = listOf(navArgument("conversationId") { type = NavType.StringType })
                         ) { backStackEntry ->
                             val conversationId = backStackEntry.arguments?.getString("conversationId") ?: return@composable
@@ -93,19 +99,34 @@ fun PocketApp() {
                             ChatScreen(
                                 viewModel = vm,
                                 onOpenSettings = { nav.navigate(Routes.SETTINGS) },
-                                onNewConversation = { id ->
-                                    nav.navigate(Routes.chat(id)) {
-                                        popUpTo(Routes.CHAT_LIST)
+                                onOpenFiles = { nav.navigate(Routes.FILES) },
+                                onNewConversation = {
+                                    // Pop back to CHAT (no ID) route
+                                    nav.popBackStack(Routes.CHAT, inclusive = false)
+                                    // If CHAT wasn't on the stack, navigate to it
+                                    if (nav.currentDestination?.route != Routes.CHAT) {
+                                        nav.navigate(Routes.CHAT) {
+                                            popUpTo(Routes.CHAT) { inclusive = true }
+                                        }
+                                    } else {
+                                        vm.newConversation()
                                     }
                                 },
                                 onOpenConversation = { id ->
-                                    nav.navigate(Routes.chat(id))
+                                    nav.navigate(Routes.chatWithId(id))
                                 }
                             )
                         }
                         composable(Routes.SETTINGS) {
                             val vm: SettingsViewModel = hiltViewModel()
                             SettingsScreen(
+                                viewModel = vm,
+                                onBack = { nav.popBackStack() }
+                            )
+                        }
+                        composable(Routes.FILES) {
+                            val vm: FileBrowserViewModel = hiltViewModel()
+                            FileBrowserScreen(
                                 viewModel = vm,
                                 onBack = { nav.popBackStack() }
                             )

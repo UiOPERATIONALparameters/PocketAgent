@@ -5,11 +5,15 @@ import kotlinx.serialization.Serializable
 
 /**
  * A single chat message in the conversation.
+ *
+ * Content can be either a plain string (for text-only messages) or a list of
+ * content parts (for multimodal messages with text + images).
  */
 @Serializable
 data class ChatMessage(
     val role: Role,
     val content: String? = null,
+    val contentParts: List<ContentPart>? = null,  // for multimodal (vision)
     val reasoning: String? = null,
     val toolCalls: List<ToolCall> = emptyList(),
     val toolCallId: String? = null,  // set when role == Tool
@@ -23,6 +27,19 @@ data class ChatMessage(
         val name: String,
         val arguments: String  // raw JSON arguments
     )
+
+    @Serializable
+    sealed class ContentPart {
+        @Serializable
+        data class Text(val text: String) : ContentPart()
+
+        @Serializable
+        data class Image(
+            val base64: String,        // base64-encoded image data (no data: prefix)
+            val mimeType: String,      // e.g. "image/png", "image/jpeg"
+            val detail: String = "auto"  // "auto", "low", "high" — OpenAI spec
+        ) : ContentPart()
+    }
 }
 
 /**

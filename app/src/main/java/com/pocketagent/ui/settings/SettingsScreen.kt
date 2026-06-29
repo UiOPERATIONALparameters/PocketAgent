@@ -3,17 +3,16 @@ package com.pocketagent.ui.settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -32,9 +31,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -141,7 +140,7 @@ fun SettingsScreen(
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
                                 .weight(1f)
-                                .clickable(onClick = { viewModel.save(); viewModel.testConnection() })
+                                .clickable(onClick = viewModel::saveAndTest)
                         ) {
                             Row(
                                 modifier = Modifier.padding(14.dp),
@@ -255,6 +254,131 @@ fun SettingsScreen(
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+
+                // Agent section
+                Section(title = "Agent") {
+                    // System prompt
+                    Text("System Prompt", style = PocketType.Label, color = ext.textSecondary)
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = state.systemPrompt,
+                        onValueChange = viewModel::onSystemPromptChange,
+                        placeholder = {
+                            Text(
+                                "Leave empty to use default. Custom prompt overrides the agent's identity and behavior.",
+                                style = PocketType.BodySmall,
+                                color = ext.textSecondary
+                            )
+                        },
+                        textStyle = PocketType.BodySmall.copy(color = ext.textPrimary),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 100.dp, max = 240.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = ext.surface,
+                            unfocusedContainerColor = ext.surface,
+                            focusedBorderColor = ext.accent,
+                            unfocusedBorderColor = ext.divider,
+                            cursorColor = ext.accent
+                        )
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Surface(
+                        color = ext.accent.copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .clickable(onClick = viewModel::saveSystemPrompt)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(Icons.Filled.Check, contentDescription = null, tint = ext.accent, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.size(6.dp))
+                            Text("Save System Prompt", style = PocketType.LabelSmall, color = ext.accent)
+                        }
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    // Bash timeout
+                    Text("Bash Command Timeout (seconds)", style = PocketType.Label, color = ext.textSecondary)
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = state.bashTimeoutSec.toString(),
+                        onValueChange = { v -> v.toIntOrNull()?.let { viewModel.onBashTimeoutChange(it.coerceIn(5, 300)) } },
+                        textStyle = PocketType.Body.copy(color = ext.textPrimary),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = ext.surface,
+                            unfocusedContainerColor = ext.surface,
+                            focusedBorderColor = ext.accent,
+                            unfocusedBorderColor = ext.divider,
+                            cursorColor = ext.accent
+                        )
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Surface(
+                        color = ext.accent.copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .clickable(onClick = viewModel::saveBashTimeout)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(Icons.Filled.Check, contentDescription = null, tint = ext.accent, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.size(6.dp))
+                            Text("Save Timeout", style = PocketType.LabelSmall, color = ext.accent)
+                        }
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    // Workspace quota
+                    Text("Workspace Quota (MB)", style = PocketType.Label, color = ext.textSecondary)
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = state.workspaceQuotaMb.toString(),
+                        onValueChange = { v -> v.toIntOrNull()?.let { viewModel.onWorkspaceQuotaChange(it.coerceIn(100, 10240)) } },
+                        textStyle = PocketType.Body.copy(color = ext.textPrimary),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = ext.surface,
+                            unfocusedContainerColor = ext.surface,
+                            focusedBorderColor = ext.accent,
+                            unfocusedBorderColor = ext.divider,
+                            cursorColor = ext.accent
+                        )
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Surface(
+                        color = ext.accent.copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .clickable(onClick = viewModel::saveWorkspaceQuota)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(Icons.Filled.Check, contentDescription = null, tint = ext.accent, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.size(6.dp))
+                            Text("Save Quota", style = PocketType.LabelSmall, color = ext.accent)
                         }
                     }
                 }

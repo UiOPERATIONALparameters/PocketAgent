@@ -31,7 +31,8 @@ data class AppSettings(
     val accentColorHex: String? = null,    // null = default teal
     val onboardingComplete: Boolean = false,
     val workspaceQuotaMb: Int = 2048,      // max MB for agent's ~/ dir
-    val bashCommandTimeoutSec: Int = 30
+    val bashCommandTimeoutSec: Int = 30,
+    val systemPrompt: String = ""          // empty = use default from AgentLoop
 ) {
     enum class ThemeMode { SYSTEM, LIGHT, DARK }
 }

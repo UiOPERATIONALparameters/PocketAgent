@@ -48,13 +48,31 @@ data class ChatUiState(
     val isAgentRunning: Boolean = false,
     val streamingContent: String = "",
     val streamingReasoning: String = "",
+    val streamingToolCalls: List<VisibleToolCall> = emptyList(),
     val activeToolName: String? = null,
     val error: String? = null,
-    val sidebarOpen: Boolean = false
-)
+    val sidebarOpen: Boolean = false,
+    val pendingAttachments: List<Attachment> = emptyList()
+) {
+    data class VisibleToolCall(
+        val toolCallId: String,
+        val toolName: String,
+        val arguments: String,
+        val result: String? = null,
+        val isRunning: Boolean = false
+    )
+
+    data class Attachment(
+        val uri: String,
+        val mimeType: String,
+        val displayName: String,
+        val base64: String? = null  // populated when sent
+    )
+}
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
+    @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
     private val conversationDao: ConversationDao,
     private val messageDao: MessageDao,
     private val toolRunDao: ToolRunDao,
@@ -68,27 +86,63 @@ class ChatViewModel @Inject constructor(
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
 
     private var agentJob: Job? = null
+    private var messageObserverJob: Job? = null
     private val json = Json { ignoreUnknownKeys = true }
 
     init {
         viewModelScope.launch {
+            // load() is idempotent — safe to call from any ViewModel
             settings.load()
-            // Observe conversations list
+            // Observe conversations list for sidebar
             conversationDao.observeAll().collect { convs ->
                 _state.update { it.copy(conversations = convs) }
             }
         }
     }
 
+    /**
+     * Load a conversation by ID. Cancels any previous message observer.
+     * If the conversation doesn't exist, treats it as a new chat (doesn't crash).
+     */
     fun loadConversation(id: String) {
+        messageObserverJob?.cancel()
         viewModelScope.launch {
-            val conv = conversationDao.getById(id) ?: return@launch
-            _state.update {
-                it.copy(conversationId = id, title = conv.title, messages = emptyList())
+            settings.load()
+            val conv = conversationDao.getById(id)
+            if (conv == null) {
+                // Conversation doesn't exist yet — treat as new chat
+                _state.update {
+                    it.copy(
+                        conversationId = null,
+                        title = "New Chat",
+                        messages = emptyList(),
+                        streamingContent = "",
+                        streamingReasoning = "",
+                        streamingToolCalls = emptyList(),
+                        isAgentRunning = false
+                    )
+                }
+                return@launch
             }
-            messageDao.observeForConversation(id).collect { messages ->
-                val uiMessages = messages.map { it.toUi() }
-                _state.update { it.copy(messages = uiMessages) }
+            _state.update {
+                it.copy(
+                    conversationId = id,
+                    title = conv.title,
+                    messages = emptyList(),
+                    streamingContent = "",
+                    streamingReasoning = "",
+                    streamingToolCalls = emptyList(),
+                    isAgentRunning = false
+                )
+            }
+            // Observe messages for this conversation
+            messageObserverJob = viewModelScope.launch {
+                messageDao.observeForConversation(id).collect { messages ->
+                    val uiMessages = withContext(Dispatchers.IO) {
+                        messages.map { msg -> msg.toUiWithToolRuns() }
+                    }
+                    _state.update { it.copy(messages = uiMessages) }
+                }
             }
         }
     }
@@ -105,9 +159,22 @@ class ChatViewModel @Inject constructor(
         _state.update { it.copy(sidebarOpen = false) }
     }
 
+    fun addAttachment(uri: String, mimeType: String, displayName: String) {
+        _state.update {
+            it.copy(pendingAttachments = it.pendingAttachments + ChatUiState.Attachment(uri, mimeType, displayName))
+        }
+    }
+
+    fun removeAttachment(uri: String) {
+        _state.update {
+            it.copy(pendingAttachments = it.pendingAttachments.filterNot { att -> att.uri == uri })
+        }
+    }
+
     fun sendMessage() {
         val text = _state.value.inputText.trim()
-        if (text.isEmpty() || _state.value.isAgentRunning) return
+        val attachments = _state.value.pendingAttachments
+        if ((text.isEmpty() && attachments.isEmpty()) || _state.value.isAgentRunning) return
 
         val provider = activeProviderHolder.get()
         if (provider == null) {
@@ -126,7 +193,7 @@ class ChatViewModel @Inject constructor(
             if (conversationId == null) {
                 conversationId = UUID.randomUUID().toString()
                 val now = System.currentTimeMillis()
-                val title = text.take(40).ifEmpty { "New Chat" }
+                val title = text.take(40).ifEmpty { if (attachments.isNotEmpty()) "Image chat" else "New Chat" }
                 conversationDao.upsert(
                     ConversationEntity(
                         id = conversationId,
@@ -138,19 +205,62 @@ class ChatViewModel @Inject constructor(
                     )
                 )
                 _state.update { it.copy(conversationId = conversationId, title = title) }
+                // Start observing this new conversation's messages
+                messageObserverJob?.cancel()
+                messageObserverJob = viewModelScope.launch {
+                    messageDao.observeForConversation(conversationId).collect { messages ->
+                        val uiMessages = withContext(Dispatchers.IO) {
+                            messages.map { msg -> msg.toUiWithToolRuns() }
+                        }
+                        _state.update { it.copy(messages = uiMessages) }
+                    }
+                }
+            }
+
+            // Read attachments to base64 (in IO dispatcher)
+            val contentParts = withContext(Dispatchers.IO) {
+                if (attachments.isEmpty()) null
+                else {
+                    val parts = mutableListOf<ChatMessage.ContentPart>()
+                    if (text.isNotEmpty()) {
+                        parts.add(ChatMessage.ContentPart.Text(text))
+                    }
+                    for (att in attachments) {
+                        try {
+                            val uri = android.net.Uri.parse(att.uri)
+                            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                            if (bytes != null) {
+                                val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                                parts.add(ChatMessage.ContentPart.Image(
+                                    base64 = base64,
+                                    mimeType = att.mimeType,
+                                    detail = "auto"
+                                ))
+                            }
+                        } catch (_: Exception) {}
+                    }
+                    parts
+                }
             }
 
             // Persist user message
             val userMsgId = UUID.randomUUID().toString()
             val now = System.currentTimeMillis()
+            val displayContent = if (contentParts != null) {
+                // For DB storage, serialize the parts to JSON
+                json.encodeToString(
+                    kotlinx.serialization.builtins.ListSerializer(ChatMessage.ContentPart.serializer()),
+                    contentParts
+                )
+            } else text
             messageDao.upsert(
                 MessageEntity(
                     id = userMsgId,
                     conversationId = conversationId,
                     role = "user",
-                    content = text,
+                    content = if (contentParts != null) text.ifEmpty { null } else text,
                     reasoning = null,
-                    toolCallsJson = null,
+                    toolCallsJson = if (contentParts != null) displayContent else null,
                     toolCallId = null,
                     toolName = null,
                     createdAt = now
@@ -160,9 +270,11 @@ class ChatViewModel @Inject constructor(
             _state.update {
                 it.copy(
                     inputText = "",
+                    pendingAttachments = emptyList(),
                     isAgentRunning = true,
                     streamingContent = "",
                     streamingReasoning = "",
+                    streamingToolCalls = emptyList(),
                     activeToolName = null,
                     error = null
                 )
@@ -181,7 +293,8 @@ class ChatViewModel @Inject constructor(
                     agentLoop.run(
                         provider = provider,
                         modelId = modelId,
-                        messages = history
+                        messages = history,
+                        systemPrompt = settings.settings.value.systemPrompt.ifBlank { AgentLoop.DEFAULT_SYSTEM_PROMPT }
                     ).collect { event ->
                         when (event.type) {
                             AgentLoop.Event.Type.CONTENT_DELTA -> {
@@ -202,7 +315,19 @@ class ChatViewModel @Inject constructor(
                                     toolName = event.toolName ?: "unknown",
                                     arguments = event.toolArguments ?: "{}"
                                 )
-                                // Persist assistant message with tool call info
+                                // Add to visible streaming tool calls
+                                _state.update {
+                                    it.copy(
+                                        streamingToolCalls = it.streamingToolCalls + ChatUiState.VisibleToolCall(
+                                            toolCallId = tcId,
+                                            toolName = event.toolName ?: "unknown",
+                                            arguments = event.toolArguments ?: "{}",
+                                            isRunning = true
+                                        ),
+                                        activeToolName = event.toolName
+                                    )
+                                }
+                                // Persist the tool call as a message
                                 messageDao.upsert(
                                     MessageEntity(
                                         id = msgId,
@@ -210,14 +335,13 @@ class ChatViewModel @Inject constructor(
                                         role = "tool",
                                         content = null,
                                         reasoning = null,
-                                        toolCallsJson = null,
+                                        toolCallsJson = event.toolArguments,
                                         toolCallId = tcId,
                                         toolName = event.toolName,
                                         createdAt = System.currentTimeMillis(),
                                         isStreaming = true
                                     )
                                 )
-                                _state.update { it.copy(activeToolName = event.toolName) }
                             }
                             AgentLoop.Event.Type.TOOL_RESULT -> {
                                 val tcId = event.toolCallId ?: return@collect
@@ -242,14 +366,23 @@ class ChatViewModel @Inject constructor(
                                         role = "tool",
                                         content = event.toolResult,
                                         reasoning = null,
-                                        toolCallsJson = null,
+                                        toolCallsJson = pending.arguments,
                                         toolCallId = tcId,
                                         toolName = pending.toolName,
                                         createdAt = System.currentTimeMillis(),
                                         isStreaming = false
                                     )
                                 )
-                                _state.update { it.copy(activeToolName = null) }
+                                // Update visible streaming tool calls
+                                _state.update {
+                                    it.copy(
+                                        streamingToolCalls = it.streamingToolCalls.map { vtc ->
+                                            if (vtc.toolCallId == tcId) vtc.copy(result = event.toolResult, isRunning = false)
+                                            else vtc
+                                        },
+                                        activeToolName = null
+                                    )
+                                }
                             }
                             AgentLoop.Event.Type.FINISHED -> {
                                 // Persist the assistant's final content as a message
@@ -280,6 +413,7 @@ class ChatViewModel @Inject constructor(
                                         isAgentRunning = false,
                                         streamingContent = "",
                                         streamingReasoning = "",
+                                        streamingToolCalls = emptyList(),
                                         activeToolName = null
                                     )
                                 }
@@ -290,6 +424,7 @@ class ChatViewModel @Inject constructor(
                                         isAgentRunning = false,
                                         streamingContent = "",
                                         streamingReasoning = "",
+                                        streamingToolCalls = emptyList(),
                                         activeToolName = null,
                                         error = event.error
                                     )
@@ -314,8 +449,14 @@ class ChatViewModel @Inject constructor(
         _state.update { it.copy(isAgentRunning = false, activeToolName = null) }
     }
 
-    fun newConversation(): String {
-        val id = UUID.randomUUID().toString()
+    /**
+     * Start a new conversation. Clears current state but does NOT navigate
+     * to a fake URL — the conversation is created when the user sends the
+     * first message.
+     */
+    fun newConversation() {
+        messageObserverJob?.cancel()
+        agentJob?.cancel()
         _state.update {
             it.copy(
                 conversationId = null,
@@ -324,34 +465,41 @@ class ChatViewModel @Inject constructor(
                 inputText = "",
                 streamingContent = "",
                 streamingReasoning = "",
-                isAgentRunning = false
+                streamingToolCalls = emptyList(),
+                isAgentRunning = false,
+                activeToolName = null,
+                pendingAttachments = emptyList()
             )
         }
-        return id
     }
 
+    /**
+     * Delete a conversation. If it's the current one, clears state.
+     */
     fun deleteConversation(id: String) {
         viewModelScope.launch {
             conversationDao.deleteById(id)
+            if (_state.value.conversationId == id) {
+                newConversation()
+            }
+        }
+    }
+
+    /**
+     * Rename a conversation.
+     */
+    fun renameConversation(id: String, newTitle: String) {
+        viewModelScope.launch {
+            conversationDao.updateTitle(id, newTitle, System.currentTimeMillis())
+            if (_state.value.conversationId == id) {
+                _state.update { it.copy(title = newTitle) }
+            }
         }
     }
 
     fun clearError() {
         _state.update { it.copy(error = null) }
     }
-
-    private fun MessageEntity.toUi(): ChatMessageUi = ChatMessageUi(
-        id = id,
-        role = role,
-        content = content ?: "",
-        reasoning = reasoning,
-        toolName = toolName,
-        toolArguments = toolRunDao.let { dao -> /* we'd need to query tool runs separately */ null },
-        toolResult = content,
-        toolDisplay = content,
-        isStreaming = isStreaming,
-        createdAt = createdAt
-    )
 
     private suspend fun MessageEntity.toUiWithToolRuns(): ChatMessageUi {
         val runs = toolRunDao.getForMessage(id)
@@ -362,16 +510,35 @@ class ChatViewModel @Inject constructor(
             content = content ?: "",
             reasoning = reasoning,
             toolName = toolName ?: firstRun?.toolName,
-            toolArguments = firstRun?.argumentsJson,
-            toolResult = firstRun?.resultJson,
-            toolDisplay = firstRun?.resultJson,
+            toolArguments = firstRun?.argumentsJson ?: toolCallsJson,
+            toolResult = firstRun?.resultJson ?: content,
+            toolDisplay = firstRun?.resultJson ?: content,
             isStreaming = isStreaming,
             createdAt = createdAt
         )
     }
 
     private fun MessageEntity.toLlm(): ChatMessage = when (role) {
-        "user" -> ChatMessage(role = ChatMessage.Role.User, content = content)
+        "user" -> {
+            // Check if there are multimodal content parts stored in toolCallsJson (repurposed field)
+            val parts = toolCallsJson?.let { jsonStr ->
+                try {
+                    json.decodeFromString(
+                        kotlinx.serialization.builtins.ListSerializer(ChatMessage.ContentPart.serializer()),
+                        jsonStr
+                    )
+                } catch (_: Exception) { null }
+            }
+            if (parts != null) {
+                ChatMessage(
+                    role = ChatMessage.Role.User,
+                    content = content,
+                    contentParts = parts
+                )
+            } else {
+                ChatMessage(role = ChatMessage.Role.User, content = content)
+            }
+        }
         "assistant" -> ChatMessage(
             role = ChatMessage.Role.Assistant,
             content = content,

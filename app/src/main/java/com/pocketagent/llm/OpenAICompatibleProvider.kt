@@ -217,7 +217,30 @@ class OpenAICompatibleProvider(
                         ChatMessage.Role.Assistant -> "assistant"
                         ChatMessage.Role.Tool -> "tool"
                     })
-                    if (msg.content != null) put("content", msg.content)
+                    // Content: either string, multimodal parts, or null
+                    when {
+                        msg.contentParts != null && msg.contentParts.isNotEmpty() -> {
+                            putJsonArray("content") {
+                                for (part in msg.contentParts) {
+                                    add(when (part) {
+                                        is ChatMessage.ContentPart.Text -> buildJsonObject {
+                                            put("type", "text")
+                                            put("text", part.text)
+                                        }
+                                        is ChatMessage.ContentPart.Image -> buildJsonObject {
+                                            put("type", "image_url")
+                                            putJsonObject("image_url") {
+                                                put("url", "data:${part.mimeType};base64,${part.base64}")
+                                                if (part.detail != "auto") put("detail", part.detail)
+                                            }
+                                        }
+                                    })
+                                }
+                            }
+                        }
+                        msg.content != null -> put("content", msg.content)
+                        else -> put("content", JsonPrimitive(null as String?))
+                    }
                     if (msg.name != null) put("name", msg.name)
                     if (msg.toolCallId != null) put("tool_call_id", msg.toolCallId)
                     if (msg.toolCalls.isNotEmpty()) {
