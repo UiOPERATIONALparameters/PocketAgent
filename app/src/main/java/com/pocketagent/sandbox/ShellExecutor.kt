@@ -1,7 +1,6 @@
 package com.pocketagent.sandbox
 
 import android.content.Context
-import android.os.Build
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -14,36 +13,22 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * v2.1 Shell Executor — radically simpler than v2.0.
+ * v3.0 Shell Executor — NATIVE execution, no proot.
  *
- * Two-tier execution:
+ * Runs commands using the Termux bootstrap's bash (Android-native binary).
+ * No proot, no container, no ptrace — just native execution.
  *
- * Tier 1 (Lite — always available, no setup):
- *   - Uses Android's /system/bin/sh (mksh)
- *   - Has: ls, cat, echo, grep, sed, awk, head, tail, wc, sort, uniq, tr, cut, mkdir, rm, cp, mv
- *   - Has: curl, wget (if Android includes them — varies by device)
- *   - Does NOT have: python3, node, git, gcc, pip, npm
- *   - Fast, zero overhead
+ * Two tiers:
+ *   Tier 1 (always): /system/bin/sh — basic coreutils
+ *   Tier 2 (after install): usr/bin/bash — full bash + apt + pkg + anything installable
  *
- * Tier 2 (Full Linux — requires one-time install via LinuxEnvironmentManager):
- *   - Uses proot to run commands inside an Ubuntu 22.04 container
- *   - Has: bash, apt, python3, perl (pre-installed)
- *   - Can install: node, git, gcc, ffmpeg, ImageMagick, anything via apt
- *   - /tmp is writable (proot virtualizes it)
- *   - No path translation issues (standard Linux paths)
- *   - Slight overhead (proot ptrace-based interception)
- *
- * The tier is chosen automatically:
- *   - If Linux is installed → use Tier 2 (proot)
- *   - If not → use Tier 1 (system shell)
- *
- * The agent's system prompt is honest about which tier is active.
+ * The agent can install packages with: pkg install python nodejs git gcc ffmpeg
  */
 @Singleton
 class ShellExecutor @Inject constructor(
     @ApplicationContext private val context: Context,
     private val workspace: Workspace,
-    private val linuxEnv: LinuxEnvironmentManager
+    private val nativeEnv: NativeEnvironmentManager
 ) {
 
     data class Result(
@@ -53,7 +38,7 @@ class ShellExecutor @Inject constructor(
         val durationMs: Long,
         val timedOut: Boolean = false,
         val truncated: Boolean = false,
-        val usedLinux: Boolean = false
+        val usedNative: Boolean = false
     ) {
         val isSuccess: Boolean get() = exitCode == 0 && !timedOut
     }
@@ -65,39 +50,51 @@ class ShellExecutor @Inject constructor(
     ): Result = withContext(Dispatchers.IO) {
         val start = System.currentTimeMillis()
 
-        // Choose execution tier
-        val linuxInstalled = linuxEnv.isInstalled()
-        val useLinux = linuxInstalled
+        val nativeInstalled = nativeEnv.isInstalled()
+        val useNative = nativeInstalled
 
-        val shellCommand: List<String> = if (useLinux) {
-            // Tier 2: run via proot inside the Ubuntu/Alpine container
-            // Working directory is /root/workspace (bind-mounted to the agent's workspace)
-            linuxEnv.buildProotCommand(command, workingDir = "/root/workspace")
+        // Choose shell
+        val shellCommand: List<String> = if (useNative) {
+            // Tier 2: use native bash with profile sourced
+            val bashPath = nativeEnv.getBashPath()!!
+            listOf(bashPath, "--login", "-c",
+                "source \"${workspace.homeDir.absolutePath}/.profile\" 2>/dev/null\n" + command)
         } else {
-            // Tier 1: use Android's system shell
-            // Working directory is the agent's workspace
+            // Tier 1: Android system shell
             listOf("/system/bin/sh", "-c", command)
         }
 
         val pb = ProcessBuilder(shellCommand)
-            .directory(if (useLinux) File(workspace.homeDir.absolutePath) else workspace.homeDir)
+            .directory(workspace.homeDir)
             .redirectErrorStream(false)
 
         // Set up environment
         val env = pb.environment()
-        env["HOME"] = if (useLinux) "/root" else workspace.homeDir.absolutePath
+        env["HOME"] = workspace.homeDir.absolutePath
         env["TERM"] = "xterm-256color"
         env["LANG"] = "en_US.UTF-8"
         env["LC_ALL"] = "en_US.UTF-8"
-        env["PWD"] = if (useLinux) "/root/workspace" else workspace.homeDir.absolutePath
+        env["PWD"] = workspace.homeDir.absolutePath
+        env["TMPDIR"] = workspace.tmpDir.absolutePath
 
-        if (!useLinux) {
-            // Tier 1: add system paths
-            env["PATH"] = "/system/bin:/system/xbin:${env["PATH"] ?: ""}"
-            env["TMPDIR"] = workspace.tmpDir.absolutePath
+        if (useNative) {
+            // Set PATH, LD_LIBRARY_PATH, PREFIX for native environment
+            env["PATH"] = nativeEnv.getPath()
+            env["LD_LIBRARY_PATH"] = nativeEnv.libDir.absolutePath
+            env["PREFIX"] = nativeEnv.usrDir.absolutePath
+
+            // SSL certificate paths
+            val certDir = File(nativeEnv.etcDir, "ssl/certs")
+            val caBundle = File(certDir, "ca-certificates.crt")
+            if (caBundle.exists()) {
+                env["CURL_CA_BUNDLE"] = caBundle.absolutePath
+                env["SSL_CERT_FILE"] = caBundle.absolutePath
+                env["SSL_CERT_DIR"] = certDir.absolutePath
+                env["REQUESTS_CA_BUNDLE"] = caBundle.absolutePath
+                env["GIT_SSL_CAINFO"] = caBundle.absolutePath
+            }
         } else {
-            // Tier 2: proot is statically linked — no LD_LIBRARY_PATH needed
-            env["TMPDIR"] = workspace.tmpDir.absolutePath
+            env["PATH"] = "/system/bin:/system/xbin:${env["PATH"] ?: ""}"
         }
 
         val process = try {
@@ -106,11 +103,11 @@ class ShellExecutor @Inject constructor(
             return@withContext Result(
                 stdout = "",
                 stderr = "Failed to start process: ${e.message}\n\n" +
-                    if (useLinux) "Linux environment may be corrupt. Try reinstalling from Settings."
-                    else "If you want full Linux capabilities (python3, node, git), install the Linux Environment from Settings.",
+                    if (useNative) "Native environment may be corrupt. Try reinstalling from Settings."
+                    else "Install the Linux Environment from Settings for full capabilities.",
                 exitCode = -1,
                 durationMs = System.currentTimeMillis() - start,
-                usedLinux = useLinux
+                usedNative = useNative
             )
         }
 
@@ -123,7 +120,6 @@ class ShellExecutor @Inject constructor(
         }
 
         if (result == null) {
-            // Timed out
             process.destroyForcibly()
             try { process.waitFor() } catch (_: Exception) {}
             Result(
@@ -132,98 +128,17 @@ class ShellExecutor @Inject constructor(
                 exitCode = -1,
                 durationMs = System.currentTimeMillis() - start,
                 timedOut = true,
-                usedLinux = useLinux
+                usedNative = useNative
             )
         } else {
             val (stdoutPair, stderrPair, exitCode) = result
-            val stdoutStr = stdoutPair.first
-            val stderrStr = stderrPair.first
-
-            // If proot failed (e.g., SELinux blocked ptrace), fall back to system shell
-            var finalStdout = stdoutStr
-            var finalStderr = stderrStr
-            var finalUsedLinux = useLinux
-
-            if (exitCode != 0 && useLinux && (
-                stderrStr.contains("proot", ignoreCase = true) ||
-                stderrStr.contains("ptrace", ignoreCase = true) ||
-                stderrStr.contains("Permission denied", ignoreCase = true) ||
-                stderrStr.contains("tracee", ignoreCase = true) ||
-                exitCode == 127 || exitCode == 255
-            )) {
-                // proot failed — fall back to system shell
-                val fallbackResult = executeSystemShell(command, timeoutSec, maxOutputBytes, start)
-                finalStdout = fallbackResult.stdout +
-                    "\n\n[Note: Linux environment failed, used system shell. Error was: ${stderrStr.take(200)}]"
-                finalStderr = stderrStr
-                finalUsedLinux = false
-            }
-
             Result(
-                stdout = finalStdout,
-                stderr = finalStderr,
+                stdout = stdoutPair.first,
+                stderr = stderrPair.first,
                 exitCode = exitCode,
                 durationMs = System.currentTimeMillis() - start,
                 truncated = stdoutPair.second || stderrPair.second,
-                usedLinux = finalUsedLinux
-            )
-        }
-    }
-
-    /**
-     * Fallback: run with Android's system shell.
-     */
-    private suspend fun executeSystemShell(
-        command: String,
-        timeoutSec: Int,
-        maxOutputBytes: Int,
-        start: Long
-    ): Result = withContext(Dispatchers.IO) {
-        val pb = ProcessBuilder("/system/bin/sh", "-c", command)
-            .directory(workspace.homeDir)
-            .redirectErrorStream(false)
-
-        val env = pb.environment()
-        env["HOME"] = workspace.homeDir.absolutePath
-        env["TERM"] = "xterm-256color"
-        env["PATH"] = "/system/bin:/system/xbin:${env["PATH"] ?: ""}"
-        env["TMPDIR"] = workspace.tmpDir.absolutePath
-
-        val process = try {
-            pb.start()
-        } catch (e: IOException) {
-            return@withContext Result(
-                stdout = "",
-                stderr = "System shell also failed: ${e.message}",
-                exitCode = -1,
-                durationMs = System.currentTimeMillis() - start
-            )
-        }
-
-        val result = withTimeoutOrNull((timeoutSec * 1000L)) {
-            coroutineScope {
-                val stdoutJob = async { readStream(process.inputStream, maxOutputBytes) }
-                val stderrJob = async { readStream(process.errorStream, maxOutputBytes) }
-                Triple(stdoutJob.await(), stderrJob.await(), process.waitFor())
-            }
-        }
-
-        if (result == null) {
-            process.destroyForcibly()
-            Result(
-                stdout = "",
-                stderr = "Timed out",
-                exitCode = -1,
-                durationMs = System.currentTimeMillis() - start,
-                timedOut = true
-            )
-        } else {
-            Result(
-                stdout = result.first.first,
-                stderr = result.second.first,
-                exitCode = result.third,
-                durationMs = System.currentTimeMillis() - start,
-                truncated = result.first.second || result.second.second
+                usedNative = useNative
             )
         }
     }
@@ -241,16 +156,13 @@ class ShellExecutor @Inject constructor(
                     val toRead = maxBytes - total
                     if (toRead > 0) sb.append(String(buf, 0, toRead, Charsets.UTF_8))
                     truncated = true
-                    // Drain the rest to avoid broken pipe
                     while (stream.read(buf) >= 0) { /* discard */ }
                     break
                 }
                 sb.append(String(buf, 0, n, Charsets.UTF_8))
                 total += n
             }
-        } catch (_: IOException) {
-            // Stream closed — fine
-        }
+        } catch (_: IOException) {}
         return sb.toString() to truncated
     }
 }

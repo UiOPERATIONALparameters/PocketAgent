@@ -3,7 +3,7 @@ package com.pocketagent.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.pocketagent.llm.ModelInfo
-import com.pocketagent.sandbox.LinuxEnvironmentManager
+import com.pocketagent.sandbox.NativeEnvironmentManager
 import com.pocketagent.storage.ActiveProviderHolder
 import com.pocketagent.storage.prefs.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -31,20 +31,18 @@ data class SettingsUiState(
     val workspaceQuotaMb: Int = 2048,
     val maxToolIterations: Int = 50,
     val tokenSaveMode: Boolean = false,
-    // Linux environment state (v2.1 — replaces bootstrap)
     val linuxInstalled: Boolean = false,
     val linuxInstalling: Boolean = false,
     val linuxProgress: Float = 0f,
     val linuxStatus: String = "",
-    val linuxAbi: String = "",
-    val linuxDistro: String = ""
+    val linuxAbi: String = ""
 )
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val providerHolder: ActiveProviderHolder,
-    private val linuxEnv: LinuxEnvironmentManager
+    private val nativeEnv: NativeEnvironmentManager
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsUiState())
@@ -55,8 +53,7 @@ class SettingsViewModel @Inject constructor(
             settingsRepository.load()
             val provider = settingsRepository.getActiveProvider()
             val s = settingsRepository.settings.value
-            val abi = LinuxEnvironmentManager.detectAbi()
-            val distro = LinuxEnvironmentManager.getDistroName(abi)
+            val abi = NativeEnvironmentManager.detectAbi()
             if (provider != null) {
                 _state.update {
                     it.copy(
@@ -70,9 +67,8 @@ class SettingsViewModel @Inject constructor(
                         workspaceQuotaMb = s.workspaceQuotaMb,
                         maxToolIterations = s.maxToolIterations,
                         tokenSaveMode = s.tokenSaveMode,
-                        linuxInstalled = linuxEnv.isInstalled(),
-                        linuxAbi = abi,
-                        linuxDistro = distro
+                        linuxInstalled = nativeEnv.isInstalled(),
+                        linuxAbi = abi
                     )
                 }
                 refreshModels()
@@ -84,9 +80,8 @@ class SettingsViewModel @Inject constructor(
                         workspaceQuotaMb = s.workspaceQuotaMb,
                         maxToolIterations = s.maxToolIterations,
                         tokenSaveMode = s.tokenSaveMode,
-                        linuxInstalled = linuxEnv.isInstalled(),
-                        linuxAbi = abi,
-                        linuxDistro = distro
+                        linuxInstalled = nativeEnv.isInstalled(),
+                        linuxAbi = abi
                     )
                 }
             }
@@ -198,24 +193,15 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * v2.1: Install the Linux environment (Ubuntu 22.04 via proot).
-     *
-     * This replaces the old Termux bootstrap approach. The new approach:
-     *   1. Extracts a static proot binary from APK assets (~1MB, instant)
-     *   2. Downloads Ubuntu 22.04 base rootfs (~28MB)
-     *   3. Extracts it (~150MB on disk)
-     *   4. Configures DNS, /tmp, /root
-     *
-     * Once installed, the agent has: bash, apt, python3, perl, AND can install
-     * node, git, gcc, ffmpeg, ImageMagick, anything via `apt install`.
+     * v3.0: Install the native Linux environment (Termux bootstrap).
+     * No proot — runs natively via Android's linker.
      */
     fun installLinux() {
         if (_state.value.linuxInstalling) return
 
-        // Check storage first (need ~200MB free for Ubuntu rootfs — 28MB download + ~150MB extracted)
-        if (!linuxEnv.hasEnoughStorage(200)) {
+        if (!nativeEnv.hasEnoughStorage(200)) {
             _state.update {
-                it.copy(linuxStatus = "Not enough free storage. Need at least 200MB free. Please delete some files and try again.")
+                it.copy(linuxStatus = "Not enough free storage. Need at least 200MB free.")
             }
             return
         }
@@ -224,24 +210,17 @@ class SettingsViewModel @Inject constructor(
             it.copy(
                 linuxInstalling = true,
                 linuxProgress = 0f,
-                linuxStatus = "Starting installation…"
+                linuxStatus = "Starting installation..."
             )
         }
         viewModelScope.launch {
-            val result = linuxEnv.installRootfs { status, downloaded, total ->
+            val result = nativeEnv.install { status, downloaded, total ->
                 if (total > 0) {
                     val pct = downloaded.toFloat() / total
                     _state.update {
                         it.copy(
                             linuxProgress = pct,
                             linuxStatus = "$status ${(pct * 100).toInt()}%"
-                        )
-                    }
-                } else if (downloaded > 0) {
-                    _state.update {
-                        it.copy(
-                            linuxProgress = -1f,  // indeterminate
-                            linuxStatus = "$status ${(downloaded / 1024 / 1024)}MB"
                         )
                     }
                 } else {
@@ -256,7 +235,7 @@ class SettingsViewModel @Inject constructor(
                         linuxInstalling = false,
                         linuxInstalled = true,
                         linuxProgress = 1f,
-                        linuxStatus = "Linux installed! The AI now has full Ubuntu access (apt, python3, + can install anything)."
+                        linuxStatus = "Linux installed! The AI now has full bash + apt + pkg access."
                     )
                 }
             } else {
@@ -272,7 +251,7 @@ class SettingsViewModel @Inject constructor(
 
     fun uninstallLinux() {
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { linuxEnv.uninstall() }
+            withContext(Dispatchers.IO) { nativeEnv.uninstall() }
             _state.update {
                 it.copy(
                     linuxInstalled = false,
@@ -294,8 +273,7 @@ class SettingsViewModel @Inject constructor(
                     bashTimeoutSec = it.bashTimeoutSec,
                     workspaceQuotaMb = it.workspaceQuotaMb,
                     linuxInstalled = it.linuxInstalled,
-                    linuxAbi = it.linuxAbi,
-                    linuxDistro = it.linuxDistro
+                    linuxAbi = it.linuxAbi
                 )
             }
         }
