@@ -327,6 +327,32 @@ fun ChatScreen(
             )
         }
 
+        // Scroll-to-bottom button when user scrolled up
+        if (userScrolledUp) {
+            Surface(
+                onClick = {
+                    userScrolledUp = false
+                    val target = state.messages.size + (if (state.streamingContent.isNotEmpty() || state.streamingToolCalls.isNotEmpty()) 1 else 0) - 1
+                    if (target >= 0) {
+                        listState.animateScrollToItem(target.coerceAtLeast(0))
+                    }
+                },
+                color = extendedColors().accent,
+                shape = RoundedCornerShape(50),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp)
+                    .size(44.dp)
+            ) {
+                Icon(
+                    Icons.Filled.KeyboardArrowDown,
+                    contentDescription = "Scroll to bottom",
+                    tint = extendedColors().textOnAccent,
+                    modifier = Modifier.padding(10.dp)
+                )
+            }
+        }
+
         // Error banner
         AnimatedVisibility(
             visible = state.error != null,
@@ -601,7 +627,7 @@ private fun ToolCallCard(
 ) {
     val context = LocalContext.current
     // Auto-expand while running, collapse when done
-    var expanded by remember(toolName, arguments, result, isRunning) { mutableStateOf(isRunning) }
+    var expanded by remember(toolName, arguments, result) { mutableStateOf(false) }
     val ext = extendedColors()
 
     // Build a short summary for the collapsed view

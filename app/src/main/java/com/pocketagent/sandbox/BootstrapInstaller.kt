@@ -142,9 +142,11 @@ class BootstrapInstaller @Inject constructor(
                 }
             }
 
-            // Also set +x on .so files (some are loaded as executables)
+            // CRITICAL: Set executable on ALL files in lib/ AND ALL subdirectories
+            // This includes lib/apt/methods/http, https, copy, file, gpgv, rsh, store
+            // lib/git-core/*, lib/*.so, etc.
             if (libDir.exists()) {
-                libDir.listFiles()?.forEach { file ->
+                libDir.walkTopDown().forEach { file ->
                     if (file.isFile) {
                         file.setExecutable(true, true)
                         file.setReadable(true, true)
