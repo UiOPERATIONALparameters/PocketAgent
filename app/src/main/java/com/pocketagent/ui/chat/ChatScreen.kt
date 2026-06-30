@@ -98,24 +98,42 @@ fun ChatScreen(
     var userScrolledUp by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    // v3.7 FIX: Auto-scroll logic completely rewritten.
-    // Old code fired on every layout change (including auto-scroll itself), creating
-    // a feedback loop where the user couldn't scroll up because auto-scroll kept
-    // fighting them. New logic: only mark userScrolledUp when the USER is actively
-    // dragging (isScrollInProgress = true), not when auto-scroll moves the list.
-    LaunchedEffect(listState) {
+    // v4.0 FIX: Auto-scroll — SIMPLE and RELIABLE.
+    // Only auto-scroll when NEW messages are added (not on every content update).
+    // User can freely scroll up during streaming — auto-scroll won't fight them.
+    // User scrolls back to bottom → auto-scroll resumes.
+    LaunchedEffect(state.messages.size) {
+        // Only auto-scroll when a new message is added AND user is at/near bottom
+        if (!userScrolledUp) {
+            val target = state.messages.size - 1
+            if (target >= 0) {
+                listState.animateScrollToItem(target)
+            }
+        }
+    }
+
+    // Detect user scroll — but ONLY when user is actively dragging
+    // (not when auto-scroll moves the list programmatically)
+    val scrollListener = remember {
+        object : androidx.compose.foundation.gestures.ScrollableState {
+            override val isScrollInProgress: Boolean get() = listState.isScrollInProgress
+            override fun dispatchRawDelta(delta: Float): Float = 0f
+        }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress }
             .distinctUntilChanged()
-            .filter { it }  // only when scroll STARTS
-            .collect {
-                // User is actively scrolling — check if they're NOT at the bottom
-                val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-                val totalItems = listState.layoutInfo.totalItemsCount
-                if (totalItems > 0 && lastVisible < totalItems - 2) {
-                    userScrolledUp = true
-                } else if (totalItems > 0 && lastVisible >= totalItems - 1) {
-                    // User scrolled back to bottom — resume auto-scroll
-                    userScrolledUp = false
+            .collect { scrolling ->
+                if (scrolling) {
+                    // User is scrolling — check position
+                    val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                    val totalItems = listState.layoutInfo.totalItemsCount
+                    if (totalItems > 0 && lastVisible >= totalItems - 2) {
+                        userScrolledUp = false  // at bottom — resume auto-scroll
+                    } else {
+                        userScrolledUp = true   // scrolled up — stop auto-scroll
+                    }
                 }
             }
     }
@@ -152,15 +170,8 @@ fun ChatScreen(
         }
     }
 
-    // Smart auto-scroll — only scroll if user hasn't scrolled up
-    LaunchedEffect(state.messages.size, state.streamingContent, state.streamingToolCalls.size) {
-        if (!userScrolledUp) {
-            val target = state.messages.size + (if (state.streamingContent.isNotEmpty() || state.streamingToolCalls.isNotEmpty()) 1 else 0) - 1
-            if (target >= 0) {
-                listState.animateScrollToItem(target.coerceAtLeast(0))
-            }
-        }
-    }
+    // v4.0: Removed the streaming-content auto-scroll that fought user scrolling.
+    // Auto-scroll now ONLY fires on new messages (see LaunchedEffect above).
 
     Box(
         modifier = Modifier

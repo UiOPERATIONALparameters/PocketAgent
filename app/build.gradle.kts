@@ -12,7 +12,11 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.pocketagent"
+        // v4.0 CRITICAL: applicationId MUST be "com.termux" so that the data directory
+        // is /data/data/com.termux/files/ — this makes ALL hardcoded paths in Termux
+        // binaries match exactly. No LD_PRELOAD, no path rewriting, no wrappers needed.
+        // The namespace stays "com.pocketagent" so we don't need to rename source files.
+        applicationId = "com.termux"
         minSdk = 26
         // CRITICAL: targetSdk 28 is required for executing binaries from app-private
         // storage. Android 10+ (API 29+) enforces W^X (Write XOR Execute) which blocks
@@ -23,8 +27,8 @@ android {
         //   - POST_NOTIFICATIONS permission requested at runtime
         //   - FOREGROUND_SERVICE_DATA_SYNC permission declared
         targetSdk = 28
-        versionCode = 38
-        versionName = "3.7.0"
+        versionCode = 40
+        versionName = "4.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
