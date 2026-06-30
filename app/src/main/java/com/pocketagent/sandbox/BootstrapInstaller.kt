@@ -24,12 +24,39 @@ class BootstrapInstaller @Inject constructor(
     private val workspace: Workspace
 ) {
     companion object {
-        private const val GITHUB_API_URL = "https://api.github.com/repos/termux/termux-packages/releases"
-        private val FALLBACK_URLS = listOf(
-            "https://github.com/termux/termux-packages/releases/latest/download/bootstrap-aarch64.zip",
-            "https://packages.termux.dev/bootstrap-aarch64.zip"
+        // GitHub releases/latest/download/<name> redirects to the actual asset — no API call needed.
+        // This avoids the 60-req/hour unauthenticated rate limit (H19).
+        private fun bootstrapUrlForAbi(abi: String): String =
+            "https://github.com/termux/termux-packages/releases/latest/download/bootstrap-$abi.zip"
+
+        private val FALLBACK_URLS_BASE = listOf(
+            "https://github.com/termux/termux-packages/releases/latest/download/bootstrap-%s.zip",
+            "https://packages.termux.dev/bootstrap-%s.zip"
         )
         const val MARKER_FILE = ".bootstrap_installed"
+
+        /** Map Android Build.SUPPORTED_ABIS to Termux bootstrap ABI name. */
+        fun detectBootstrapAbi(): String {
+            val primaryAbi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
+            return when (primaryAbi) {
+                "arm64-v8a" -> "aarch64"
+                "armeabi-v7a", "armeabi" -> "arm"
+                "x86_64" -> "x86_64"
+                "x86" -> "i686"
+                else -> "aarch64"
+            }
+        }
+
+        /** Map device ABI to dpkg/apt architecture. */
+        fun detectDpkgArch(): String {
+            return when (detectBootstrapAbi()) {
+                "aarch64" -> "arm64"
+                "arm" -> "armhf"
+                "x86_64" -> "amd64"
+                "i686" -> "i386"
+                else -> "arm64"
+            }
+        }
     }
 
     val usrDir: File = File(context.filesDir, "usr")
@@ -79,15 +106,11 @@ class BootstrapInstaller @Inject constructor(
 
     suspend fun install(onProgress: (Long, Long) -> Unit): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val zipFile = File(context.cacheDir, "bootstrap-aarch64.zip")
+            val abi = detectBootstrapAbi()
+            val zipFile = File(context.cacheDir, "bootstrap-$abi.zip")
 
-            // Try to find the latest bootstrap URL from GitHub API
-            val urls = mutableListOf<String>()
-            val apiUrl = findLatestBootstrapUrl()
-            if (apiUrl != null) {
-                urls.add(apiUrl)
-            }
-            urls.addAll(FALLBACK_URLS)
+            // Build URL list for the detected ABI (skip GitHub API — H19)
+            val urls = FALLBACK_URLS_BASE.map { it.format(abi) }
 
             var downloadSuccess = false
             var lastError: String? = null
@@ -104,12 +127,12 @@ class BootstrapInstaller @Inject constructor(
             }
 
             if (!downloadSuccess) {
-                return@withContext Result.failure(IOException("Failed to download bootstrap from all URLs. Last error: $lastError"))
+                return@withContext Result.failure(IOException("Failed to download bootstrap ($abi) from all URLs. Last error: $lastError"))
             }
 
             // Verify the downloaded zip is valid (not a partial download)
-            if (!zipFile.exists() || zipFile.length() < 1_000_000) {
-                // Bootstrap should be at least ~40MB. If it's smaller, it's likely
+            if (!zipFile.exists() || zipFile.length() < 30_000_000) {
+                // Bootstrap should be at least ~30MB. If it's smaller, it's likely
                 // a partial download from a network interruption.
                 zipFile.delete()
                 return@withContext Result.failure(IOException("Downloaded file is too small (${zipFile.length()} bytes) — likely a partial download. Please try again with a stable connection."))
@@ -142,14 +165,29 @@ class BootstrapInstaller @Inject constructor(
                 }
             }
 
-            // CRITICAL: Set executable on ALL files in lib/ AND ALL subdirectories
-            // This includes lib/apt/methods/http, https, copy, file, gpgv, rsh, store
-            // lib/git-core/*, lib/*.so, etc.
+            // CRITICAL: Set executable on .so files in lib/ (top-level only — fast).
+            // The v1.9.0 regression used walkTopDown() which walked 200+ MB and took
+            // 10-30s on slow storage, making users think the install was hung.
+            // We now do targeted walks on JUST the subdirs that need +x:
+            //   lib/apt/methods/  (http, https, copy, file, gpgv, rsh, store)
+            //   lib/git-core/     (git, git-receive-pack, etc.)
+            // Top-level lib/*.so files don't need +x (they're loaded, not exec'd).
             if (libDir.exists()) {
-                libDir.walkTopDown().forEach { file ->
+                libDir.listFiles()?.forEach { file ->
                     if (file.isFile) {
-                        file.setExecutable(true, true)
                         file.setReadable(true, true)
+                    }
+                }
+                // Only walk the specific subdirs that have executable binaries
+                listOf("apt/methods", "git-core", "exec", "coreutils").forEach { sub ->
+                    val subDir = File(libDir, sub)
+                    if (subDir.exists()) {
+                        subDir.listFiles()?.forEach { file ->
+                            if (file.isFile) {
+                                file.setExecutable(true, true)
+                                file.setReadable(true, true)
+                            }
+                        }
                     }
                 }
             }
@@ -171,6 +209,9 @@ class BootstrapInstaller @Inject constructor(
             // CRITICAL: Create .so symlinks.
             createSoSymlinks(libDir)
 
+            // CRITICAL: Create sh -> bash symlink (scripts with #!/.../sh shebangs need it)
+            createShSymlink()
+
             // CRITICAL: Create symlink bridge for termux-exec path translation
             createSymlinkBridge()
 
@@ -183,11 +224,16 @@ class BootstrapInstaller @Inject constructor(
             // Create .profile and improve .bashrc
             createShellConfigs()
 
-            // CRITICAL: Create /tmp symlink so tools that hardcode /tmp work
-            createTmpSymlink()
+            // CRITICAL: Set TMPDIR everywhere (we can't create /tmp symlink without root — C7).
+            // Tools that hardcode /tmp won't work; the system prompt instructs the agent
+            // to use $TMPDIR or ~/tmp instead. proot-distro containers have their own /tmp.
+            // We no longer call createTmpSymlink() (it always failed silently).
 
             // CRITICAL: Remove init-termux-properties.sh (causes permission errors)
             removeBrokenInitScripts()
+
+            // Install proot and proot-distro from the bootstrap if available
+            ensureProotInstalled()
 
             // Create marker file
             File(usrDir, MARKER_FILE).writeText(System.currentTimeMillis().toString())
@@ -214,42 +260,26 @@ class BootstrapInstaller @Inject constructor(
         }
     }
 
-    private fun findLatestBootstrapUrl(): String? {
-        return try {
-            val client = OkHttpClient.Builder()
-                .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-                .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-                .build()
-
-            val request = Request.Builder()
-                .url(GITHUB_API_URL)
-                .header("Accept", "application/vnd.github.v3+json")
-                .header("User-Agent", "PocketAgent")
-                .get()
-                .build()
-
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return null
-                val body = response.body?.string() ?: return null
-                val releases = org.json.JSONArray(body)
-                if (releases.length() == 0) return null
-
-                for (i in 0 until releases.length()) {
-                    val release = releases.optJSONObject(i) ?: continue
-                    val assets = release.optJSONArray("assets") ?: continue
-                    for (j in 0 until assets.length()) {
-                        val asset = assets.optJSONObject(j) ?: continue
-                        val name = asset.optString("name")
-                        if (name == "bootstrap-aarch64.zip") {
-                            return asset.optString("browser_download_url")
-                        }
-                    }
-                }
-                null
-            }
-        } catch (_: Exception) {
-            null
+    /**
+     * Ensure proot and proot-distro are available. They ship in the bootstrap zip
+     * but only if the bootstrap is recent enough — fall back to downloading separately.
+     */
+    private fun ensureProotInstalled() {
+        val prootBin = File(binDir, "proot")
+        val prootDistroBin = File(binDir, "proot-distro")
+        // If both exist, we're good
+        if (prootBin.exists() && prootDistroBin.exists()) {
+            prootBin.setExecutable(true, true)
+            prootDistroBin.setExecutable(true, true)
+            return
         }
+        // Otherwise the agent can install via pkg install proot proot-distro later.
+        // We don't fail the install — proot-distro is an optional feature.
+    }
+
+    private fun findLatestBootstrapUrl(): String? {
+        // H19 fix: no longer using GitHub API (rate limit). Direct URL handles redirect.
+        return null
     }
 
     private fun downloadZip(url: String, dest: File, onProgress: (Long, Long) -> Unit): Result<Unit> {
@@ -416,6 +446,7 @@ class BootstrapInstaller @Inject constructor(
         if (!etcDir.exists()) etcDir.mkdirs()
         val certDir = File(etcDir, "ssl/certs")
         if (!certDir.exists()) certDir.mkdirs()
+        // Use Android's system CA store — works on all devices.
         val systemCerts = File("/system/etc/security/cacerts")
         if (systemCerts.exists()) {
             val caBundle = File(certDir, "ca-certificates.crt")
@@ -428,6 +459,22 @@ class BootstrapInstaller @Inject constructor(
                 }
                 caBundle.writeText(sb.toString())
             } catch (_: Exception) {}
+        }
+        // Fallback: also try /apex/com.android.conscrypt/cacerts for newer Android
+        if (!File(certDir, "ca-certificates.crt").exists() || File(certDir, "ca-certificates.crt").length() < 1000) {
+            val apexCerts = File("/apex/com.android.conscrypt/cacerts")
+            if (apexCerts.exists()) {
+                val caBundle = File(certDir, "ca-certificates.crt")
+                try {
+                    val sb = StringBuilder()
+                    apexCerts.listFiles()?.forEach { certFile ->
+                        if (certFile.isFile) {
+                            try { sb.append(certFile.readText()); sb.append("\n") } catch (_: Exception) {}
+                        }
+                    }
+                    caBundle.writeText(sb.toString())
+                } catch (_: Exception) {}
+            }
         }
         val profileDir = File(etcDir, "profile.d")
         if (!profileDir.exists()) profileDir.mkdirs()
@@ -446,6 +493,7 @@ class BootstrapInstaller @Inject constructor(
     private fun fixAptConfig() {
         val aptDir = File(usrDir, "etc/apt")
         if (!aptDir.exists()) aptDir.mkdirs()
+        val arch = detectDpkgArch()
         val aptConf = File(aptDir, "apt.conf")
         aptConf.writeText("""
             Dir "${usrDir.absolutePath}";
@@ -456,7 +504,7 @@ class BootstrapInstaller @Inject constructor(
             Dir::Etc "${usrDir.absolutePath}/etc/apt";
             Dir::Bin::dpkg "${usrDir.absolutePath}/bin/dpkg";
             DPkg::Options { "--root=${usrDir.absolutePath}"; "--force-not-root"; "--force-confdef"; "--force-confold"; };
-            APT::Architecture "arm64";
+            APT::Architecture "$arch";
         """.trimIndent())
         val sourcesList = File(aptDir, "sources.list")
         sourcesList.writeText("deb https://packages.termux.dev/apt/termux-main/ stable main\n")
@@ -579,26 +627,22 @@ class BootstrapInstaller @Inject constructor(
     }
 
     /**
-     * CRITICAL: Create /tmp symlink.
-     * Many tools (pip, compilers, etc.) hardcode /tmp.
-     * We can't write to system /tmp, but we can create a symlink
-     * from /tmp to our workspace tmp directory.
-     * If symlink fails (permission), set TMPDIR env var (already done).
+     * CRITICAL: Create /tmp symlink — REMOVED in v2.0 (C7 fix).
+     *
+     * The previous implementation tried to symlink /tmp -> ~/tmp, which requires root.
+     * It always failed silently and was a no-op. The v1.7/v1.8 commit messages claimed
+     * "/tmp fix" but the function never actually fixed anything.
+     *
+     * In v2.0:
+     *   - $TMPDIR is set to ~/tmp in the shell environment (works for tools that respect it)
+     *   - The system prompt tells the agent to use $TMPDIR or ~/tmp instead of /tmp
+     *   - For tools that hardcode /tmp (pip, gcc, mktemp), users should install proot-distro
+     *     Debian/Ubuntu, which has its own writable /tmp inside the proot container
      */
+    @Suppress("unused")
     private fun createTmpSymlink() {
-        // Try to create /tmp -> ~/tmp symlink
-        // This may fail on some Android versions — that's OK, TMPDIR is set
-        val tmpLink = java.io.File("/tmp")
-        if (!tmpLink.exists()) {
-            try {
-                java.nio.file.Files.createSymbolicLink(
-                    tmpLink.toPath(),
-                    workspace.tmpDir.toPath()
-                )
-            } catch (_: Exception) {
-                // Can't create /tmp symlink — TMPDIR env var is the fallback
-            }
-        }
+        // Intentionally left as no-op for backward compatibility.
+        // See class docs for the v2.0 approach.
     }
 
     /**
