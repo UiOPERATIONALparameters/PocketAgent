@@ -18,7 +18,9 @@ class ToolRouter @Inject constructor(
     private val strReplaceTool: StrReplaceTool,
     private val grepTool: GrepTool,
     private val globTool: GlobTool,
-    private val installApkTool: InstallApkTool
+    private val installApkTool: InstallApkTool,
+    private val loadSkillTool: LoadSkillTool,
+    private val webReaderTool: WebReaderTool
 ) {
     private val tools: Map<String, AgentTool> = mapOf(
         bashTool.name to bashTool,
@@ -30,7 +32,9 @@ class ToolRouter @Inject constructor(
         strReplaceTool.name to strReplaceTool,
         grepTool.name to grepTool,
         globTool.name to globTool,
-        installApkTool.name to installApkTool
+        installApkTool.name to installApkTool,
+        loadSkillTool.name to loadSkillTool,
+        webReaderTool.name to webReaderTool
     )
 
     fun specs(): List<ToolSpec> = listOf(
@@ -43,6 +47,8 @@ class ToolRouter @Inject constructor(
         globTool.toSpec(),
         webFetchTool.toSpec(),
         webSearchTool.toSpec(),
+        webReaderTool.toSpec(),
+        loadSkillTool.toSpec(),
         installApkTool.toSpec()
     )
 

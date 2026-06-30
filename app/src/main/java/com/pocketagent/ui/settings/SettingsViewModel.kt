@@ -56,7 +56,7 @@ class SettingsViewModel @Inject constructor(
             val provider = settingsRepository.getActiveProvider()
             val s = settingsRepository.settings.value
             val abi = LinuxEnvironmentManager.detectAbi()
-            val distro = if (LinuxEnvironmentManager.isUbuntu(abi)) "Ubuntu 22.04 LTS" else "Alpine 3.20"
+            val distro = LinuxEnvironmentManager.getDistroName(abi)
             if (provider != null) {
                 _state.update {
                     it.copy(
@@ -212,10 +212,10 @@ class SettingsViewModel @Inject constructor(
     fun installLinux() {
         if (_state.value.linuxInstalling) return
 
-        // Check storage first (need ~300MB free)
-        if (!linuxEnv.hasEnoughStorage(300)) {
+        // Check storage first (need ~50MB free for Alpine rootfs — 3MB download + ~15MB extracted)
+        if (!linuxEnv.hasEnoughStorage(50)) {
             _state.update {
-                it.copy(linuxStatus = "Not enough free storage. Need at least 300MB free.")
+                it.copy(linuxStatus = "Not enough free storage. Need at least 50MB free. Please delete some files and try again.")
             }
             return
         }

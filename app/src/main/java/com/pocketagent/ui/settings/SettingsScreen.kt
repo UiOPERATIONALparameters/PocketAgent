@@ -470,7 +470,7 @@ fun SettingsScreen(
                                     color = ext.success
                                 )
                                 Text(
-                                    "The AI has full Ubuntu access: bash, apt, python3, perl. Can install node, git, gcc, ffmpeg, anything via 'apt install'.",
+                                    "The AI has full Alpine Linux access: bash, apk (package manager), busybox. Can install python3, node, git, gcc, ffmpeg, anything via 'apk add'.",
                                     style = PocketType.BodySmall,
                                     color = ext.textSecondary,
                                     modifier = Modifier.padding(top = 4.dp)
@@ -529,7 +529,7 @@ fun SettingsScreen(
                                     color = ext.textPrimary
                                 )
                                 Text(
-                                    "Downloads ~28MB one-time. Gives the AI a real Ubuntu 22.04 environment via proot: bash, apt, python3, + can install node, git, gcc, ffmpeg, ImageMagick, anything via 'apt install'.",
+                                    "Downloads ~3MB one-time. Gives the AI a real Alpine Linux environment via proot: bash, apk, busybox, + can install python3, node, git, gcc, ffmpeg, ImageMagick, anything via 'apk add'.",
                                     style = PocketType.BodySmall,
                                     color = ext.textSecondary,
                                     modifier = Modifier.padding(top = 4.dp)

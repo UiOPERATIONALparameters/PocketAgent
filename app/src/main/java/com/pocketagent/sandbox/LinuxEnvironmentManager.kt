@@ -64,17 +64,18 @@ class LinuxEnvironmentManager @Inject constructor(
 ) {
     companion object {
         const val MARKER_FILE = ".linux_installed"
-        const val PROOT_VERSION = "5.1.0"
+        const val PROOT_VERSION = "5.1.0-static"
 
-        // Rootfs URLs — verified working June 2026
-        // Ubuntu 22.04 LTS base (has apt, bash, perl; install python3/node/git via apt)
+        // v2.2.0: Use Alpine for ALL architectures (3MB download vs 28MB for Ubuntu).
+        // Alpine has: bash, apk (package manager), busybox, AND can install python3, node, git, gcc, etc.
+        // This is MUCH smaller and faster to install, and works on devices with low storage.
+        // For users who specifically need Ubuntu/apt, we can add an option in v2.3.
         private fun rootfsUrl(abi: String): String = when (abi) {
-            "aarch64" -> "https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04-base-arm64.tar.gz"
-            "x86_64" -> "https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04-base-amd64.tar.gz"
-            // For 32-bit ARM, use Alpine (Ubuntu doesn't publish armhf base images)
+            "aarch64" -> "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/aarch64/alpine-minirootfs-3.20.0-aarch64.tar.gz"
+            "x86_64" -> "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/x86_64/alpine-minirootfs-3.20.0-x86_64.tar.gz"
             "arm" -> "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/armhf/alpine-minirootfs-3.20.0-armhf.tar.gz"
             "i686" -> "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/x86/alpine-minirootfs-3.20.0-x86.tar.gz"
-            else -> "https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04-base-arm64.tar.gz"
+            else -> "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/aarch64/alpine-minirootfs-3.20.0-aarch64.tar.gz"
         }
 
         /** Map Android Build.SUPPORTED_ABIS to our ABI name. */
@@ -89,8 +90,9 @@ class LinuxEnvironmentManager @Inject constructor(
             }
         }
 
-        /** True if the rootfs is Ubuntu (has apt), false if Alpine (has apk). */
-        fun isUbuntu(abi: String): Boolean = abi in setOf("aarch64", "x86_64")
+        /** v2.2.0: All rootfs are Alpine now (smaller, faster, works everywhere). */
+        fun isUbuntu(abi: String): Boolean = false
+        fun getDistroName(abi: String): String = "Alpine Linux 3.20"
     }
 
     val prootDir: File = File(context.filesDir, "proot")
@@ -149,7 +151,7 @@ class LinuxEnvironmentManager @Inject constructor(
      * Download and extract the Ubuntu/Alpine rootfs.
      * This is a long operation (~28MB download + ~150MB extraction).
      *
-     * Caller should check available storage first (need ~300MB free).
+     * Caller should check available storage first (need ~50MB free for Alpine).
      */
     suspend fun installRootfs(
         onProgress: (String, Long, Long) -> Unit
@@ -180,7 +182,7 @@ class LinuxEnvironmentManager @Inject constructor(
             }
 
             // Verify download (Ubuntu is ~27MB, Alpine is ~3MB)
-            val minSize = if (isUbuntu(abi)) 20_000_000 else 2_000_000
+            val minSize = 2_000_000  // 2MB minimum (Alpine is ~3MB compressed)
             if (!archiveFile.exists() || archiveFile.length() < minSize) {
                 archiveFile.delete()
                 return@withContext Result.failure(IOException("Downloaded rootfs is too small (${archiveFile.length()} bytes) — likely a partial download. Check your connection."))
