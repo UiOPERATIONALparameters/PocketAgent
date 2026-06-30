@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 import java.io.File
@@ -403,18 +404,18 @@ class LinuxEnvironmentManager @Inject constructor(
         archiveFile.inputStream().buffered().use { fis ->
             GzipCompressorInputStream(fis).use { gzis ->
                 TarArchiveInputStream(gzis).use { tis ->
-                    var entry = tis.nextEntry as? TarArchiveEntry
+                    var entry: TarArchiveEntry? = tis.nextEntry
                     while (entry != null) {
                         // Strip "./" prefix (Alpine uses it, Ubuntu doesn't)
                         var entryPath = entry.name
                         if (entryPath.startsWith("./")) entryPath = entryPath.substring(2)
                         if (entryPath.isEmpty()) {
-                            entry = tis.nextEntry as? TarArchiveEntry
+                            entry = tis.nextEntry
                             continue
                         }
                         // Block path traversal
                         if (entryPath.contains("..") || entryPath.startsWith("/")) {
-                            entry = tis.nextEntry as? TarArchiveEntry
+                            entry = tis.nextEntry
                             continue
                         }
 
@@ -463,7 +464,7 @@ class LinuxEnvironmentManager @Inject constructor(
                             }
                             outFile.setReadable(true, false)
                         }
-                        entry = tis.nextEntry as? TarArchiveEntry
+                        entry = tis.nextEntry
                     }
                 }
             }
