@@ -63,7 +63,8 @@ fun SmoothTextField(
     OutlinedTextField(
         value = localValue,
         onValueChange = { newValue ->
-            localValue = newValue  // ONLY update local — no ViewModel call during typing
+            localValue = newValue  // update local immediately (smooth display)
+            onValueChange(newValue)  // push to ViewModel (so buttons work)
         },
         placeholder = { Text(placeholder, style = PocketType.Body, color = ext.textSecondary) },
         textStyle = PocketType.Body.copy(color = ext.textPrimary),
