@@ -7,28 +7,55 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
-import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.Paths
-import java.nio.file.StandardCopyOption
-import java.nio.file.attribute.PosixFilePermission
-import java.nio.file.attribute.PosixFilePermissions
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * v2.1 Linux Environment Manager — proot + Ubuntu rootfs.
+ * v2.1 Linux Environment Manager — replaces both BootstrapInstaller and ProotDistroManager.
  *
- * v2.1.1 FIX: Fixed rootfs extraction that was creating 0-byte files for symlinks
- * instead of actual symlinks. Ubuntu 22.04 uses merged-usr where /bin -> /usr/bin,
- * /lib -> /usr/lib, etc. Without proper symlink handling, /bin/sh was unreachable
- * even though /usr/bin/sh (-> dash) existed in the tarball.
+ * ARCHITECTURE (v2.1 — "The Big Simplification"):
+ *
+ * The v2.0 approach (Termux bootstrap + package manager) was fundamentally broken:
+ *   - The bootstrap doesn't include python3/node/git (they need `pkg install`)
+ *   - `pkg install` needs apt's HTTPS method, which has missing .so dependencies
+ *   - termux-exec path translation is fragile
+ *   - Termux paths hardcoded in compiled binaries can't be patched
+ *   - The whole chicken-and-egg: need package manager to install packages, but
+ *     package manager itself is broken
+ *
+ * The v2.1 approach is radically simpler:
+ *   1. Bundle a STATIC proot binary in the APK (one per ABI, ~1-6MB each)
+ *      - Static = no shared library dependencies, runs anywhere
+ *      - From https://github.com/proot-me/proot-static-build
+ *   2. Download an Ubuntu 22.04 rootfs on first use (~28MB compressed)
+ *      - From https://cdimage.ubuntu.com/ubuntu-base/releases/
+ *      - Contains: bash, apt, python3, perl, AND can install anything via apt
+ *   3. Run ALL agent commands via: proot --rootfs=ubuntu/ <command>
+ *      - proot handles /tmp, /var, /etc properly (virtualized)
+ *      - No path translation needed (Ubuntu uses standard Linux paths)
+ *      - apt works natively (no Termux path issues)
+ *      - python3, node, git, gcc all installable via `apt install`
+ *
+ * This is the same approach used by UserLAnd, Andronix, and other "Linux on Android"
+ * apps. It's battle-tested and works on all Android 8+ devices without root.
+ *
+ * Layout:
+ *   /data/data/com.pocketagent/files/
+ *     ├── proot/bin/proot          (extracted from APK assets, static binary)
+ *     ├── linux/                    (Ubuntu rootfs, ~150MB extracted)
+ *     │   ├── bin/sh, bin/bash
+ *     │   ├── usr/bin/python3, usr/bin/apt
+ *     │   ├── etc/, var/, tmp/
+ *     │   └── ...
+ *     └── workspace/                (agent's $HOME, shared between shell and proot)
+ *
+ * The workspace is bind-mounted into the proot container at /root, so files the agent
+ * creates are accessible both from the shell and from the file browser UI.
  */
 @Singleton
 class LinuxEnvironmentManager @Inject constructor(
@@ -37,15 +64,21 @@ class LinuxEnvironmentManager @Inject constructor(
 ) {
     companion object {
         const val MARKER_FILE = ".linux_installed"
+        const val PROOT_VERSION = "5.1.0-static"
 
+        // v2.2.0: Use Alpine for ALL architectures (3MB download vs 28MB for Ubuntu).
+        // Alpine has: bash, apk (package manager), busybox, AND can install python3, node, git, gcc, etc.
+        // This is MUCH smaller and faster to install, and works on devices with low storage.
+        // For users who specifically need Ubuntu/apt, we can add an option in v2.3.
         private fun rootfsUrl(abi: String): String = when (abi) {
-            "aarch64" -> "https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04-base-arm64.tar.gz"
-            "x86_64" -> "https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04-base-amd64.tar.gz"
+            "aarch64" -> "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/aarch64/alpine-minirootfs-3.20.0-aarch64.tar.gz"
+            "x86_64" -> "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/x86_64/alpine-minirootfs-3.20.0-x86_64.tar.gz"
             "arm" -> "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/armhf/alpine-minirootfs-3.20.0-armhf.tar.gz"
             "i686" -> "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/x86/alpine-minirootfs-3.20.0-x86.tar.gz"
-            else -> "https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04-base-arm64.tar.gz"
+            else -> "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/aarch64/alpine-minirootfs-3.20.0-aarch64.tar.gz"
         }
 
+        /** Map Android Build.SUPPORTED_ABIS to our ABI name. */
         fun detectAbi(): String {
             val primaryAbi = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
             return when (primaryAbi) {
@@ -57,48 +90,45 @@ class LinuxEnvironmentManager @Inject constructor(
             }
         }
 
-        fun isUbuntu(abi: String): Boolean = abi in setOf("aarch64", "x86_64")
+        /** v2.2.0: All rootfs are Alpine now (smaller, faster, works everywhere). */
+        fun isUbuntu(abi: String): Boolean = false
+        fun getDistroName(abi: String): String = "Alpine Linux 3.20"
     }
 
     val prootDir: File = File(context.filesDir, "proot")
     val prootBinDir: File = File(prootDir, "bin")
-    val prootLibDir: File = File(prootDir, "lib")
     val prootBinary: File get() = File(prootBinDir, "proot")
-    val libtallocFile: File get() = File(prootLibDir, "libtalloc.so.2")
     val linuxDir: File = File(context.filesDir, "linux")
 
+    /** True if the Linux environment is installed and ready. */
     fun isInstalled(): Boolean {
         return File(linuxDir, MARKER_FILE).exists() &&
             prootBinary.exists() &&
-            (File(linuxDir, "bin/sh").exists() || File(linuxDir, "usr/bin/sh").exists())
+            File(linuxDir, "bin/sh").exists()
     }
 
+    /** Get the proot binary path, or null if not extracted. */
     fun getProotPath(): String? {
         return if (prootBinary.exists() && prootBinary.canExecute()) {
             prootBinary.absolutePath
         } else null
     }
 
+    /**
+     * Extract the static proot binary from APK assets.
+     * This is fast (~1MB copy) and doesn't require network.
+     */
     suspend fun extractProot(): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val abi = detectAbi()
-            val prootAssetName = "proot/proot-$abi"
-            val libtallocAssetName = "proot/libtalloc-$abi.so"
+            val assetName = "proot/proot-$abi"
             val prootAsset = try {
-                context.assets.open(prootAssetName)
+                context.assets.open(assetName)
             } catch (e: Exception) {
-                return@withContext Result.failure(IOException("No proot binary for ABI '$abi' in assets."))
-            }
-            val libtallocAsset = try {
-                context.assets.open(libtallocAssetName)
-            } catch (e: Exception) {
-                return@withContext Result.failure(IOException("No libtalloc for ABI '$abi' in assets."))
+                return@withContext Result.failure(IOException("No proot binary for ABI '$abi' in assets. This device may not be supported."))
             }
 
             prootBinDir.mkdirs()
-            prootLibDir.mkdirs()
-
-            // Extract proot binary
             prootAsset.use { input ->
                 FileOutputStream(prootBinary).use { output ->
                     input.copyTo(output)
@@ -107,16 +137,8 @@ class LinuxEnvironmentManager @Inject constructor(
             prootBinary.setExecutable(true, true)
             prootBinary.setReadable(true, true)
 
-            // Extract libtalloc.so.2 (proot depends on it)
-            libtallocAsset.use { input ->
-                FileOutputStream(libtallocFile).use { output ->
-                    input.copyTo(output)
-                }
-            }
-            libtallocFile.setReadable(true, true)
-
             if (!prootBinary.canExecute()) {
-                return@withContext Result.failure(IOException("Failed to make proot executable."))
+                return@withContext Result.failure(IOException("Failed to make proot executable. Storage may be mounted noexec."))
             }
 
             Result.success(Unit)
@@ -125,12 +147,19 @@ class LinuxEnvironmentManager @Inject constructor(
         }
     }
 
+    /**
+     * Download and extract the Ubuntu/Alpine rootfs.
+     * This is a long operation (~28MB download + ~150MB extraction).
+     *
+     * Caller should check available storage first (need ~50MB free for Alpine).
+     */
     suspend fun installRootfs(
         onProgress: (String, Long, Long) -> Unit
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val abi = detectAbi()
 
+            // Step 1: extract proot (if not already done)
             if (!prootBinary.exists()) {
                 onProgress("Extracting proot binary...", 0, 1)
                 val prootResult = extractProot()
@@ -139,6 +168,7 @@ class LinuxEnvironmentManager @Inject constructor(
                 }
             }
 
+            // Step 2: download rootfs
             val url = rootfsUrl(abi)
             val archiveFile = File(context.cacheDir, "rootfs-$abi.tar.gz")
             onProgress("Downloading Linux rootfs (~28MB)...", 0, -1)
@@ -151,12 +181,14 @@ class LinuxEnvironmentManager @Inject constructor(
                 return@withContext Result.failure(IOException("Download failed: ${downloadResult.exceptionOrNull()?.message}"))
             }
 
-            val minSize = if (isUbuntu(abi)) 20_000_000 else 2_000_000
+            // Verify download (Ubuntu is ~27MB, Alpine is ~3MB)
+            val minSize = 2_000_000  // 2MB minimum (Alpine is ~3MB compressed)
             if (!archiveFile.exists() || archiveFile.length() < minSize) {
                 archiveFile.delete()
-                return@withContext Result.failure(IOException("Downloaded rootfs is too small (${archiveFile.length()} bytes)."))
+                return@withContext Result.failure(IOException("Downloaded rootfs is too small (${archiveFile.length()} bytes) — likely a partial download. Check your connection."))
             }
 
+            // Step 3: extract rootfs
             onProgress("Extracting rootfs (this takes a minute)...", -1, -1)
             linuxDir.mkdirs()
             if (linuxDir.exists()) {
@@ -164,40 +196,22 @@ class LinuxEnvironmentManager @Inject constructor(
                 linuxDir.mkdirs()
             }
 
-            // v2.1.1 FIX: Use the new symlink-aware extraction
-            val extractResult = extractRootfsFixed(archiveFile, linuxDir, onProgress)
-            if (extractResult.isFailure) {
-                return@withContext Result.failure(extractResult.exceptionOrNull()!!)
-            }
+            extractRootfs(archiveFile, linuxDir)
 
+            // Step 4: configure the rootfs
             onProgress("Configuring Linux environment...", -1, -1)
             configureRootfs(linuxDir, abi)
 
-            // Verify /bin/sh exists (following symlinks)
-            val binSh = File(linuxDir, "bin/sh")
-            val usrBinSh = File(linuxDir, "usr/bin/sh")
-            if (!binSh.exists() && !usrBinSh.exists()) {
-                // Diagnostic: list what we actually extracted
-                val diag = buildString {
-                    appendLine("Extraction verification failed.")
-                    appendLine("linuxDir exists: ${linuxDir.exists()}")
-                    if (linuxDir.exists()) {
-                        appendLine("linuxDir contents:")
-                        linuxDir.listFiles()?.take(20)?.forEach { f ->
-                            appendLine("  ${f.name} (dir=${f.isDirectory}, file=${f.isFile}, size=${f.length()}, canRead=${f.canRead()})")
-                        }
-                        appendLine("bin/ exists: ${File(linuxDir, "bin").exists()}")
-                        appendLine("usr/bin/ exists: ${File(linuxDir, "usr/bin").exists()}")
-                        appendLine("usr/bin/sh exists: ${File(linuxDir, "usr/bin/sh").exists()}")
-                        appendLine("usr/bin/bash exists: ${File(linuxDir, "usr/bin/bash").exists()}")
-                        appendLine("usr/bin/dash exists: ${File(linuxDir, "usr/bin/dash").exists()}")
-                    }
-                }
-                return@withContext Result.failure(IOException("Rootfs extracted but /bin/sh not found.\n$diag"))
-            }
-
+            // Step 5: create marker file
             File(linuxDir, MARKER_FILE).writeText(System.currentTimeMillis().toString())
+
+            // Clean up archive
             archiveFile.delete()
+
+            // Step 6: verify
+            if (!File(linuxDir, "bin/sh").exists()) {
+                return@withContext Result.failure(IOException("Rootfs extracted but /bin/sh not found. Installation may be corrupt."))
+            }
 
             onProgress("Done!", 1, 1)
             Result.success(Unit)
@@ -206,10 +220,19 @@ class LinuxEnvironmentManager @Inject constructor(
         }
     }
 
+    /**
+     * Configure the rootfs after extraction:
+     *   - Set up /etc/resolv.conf (DNS)
+     *   - Set up /etc/hostname
+     *   - Create /tmp directory (writable)
+     *   - Create /root directory (agent's home inside proot)
+     *   - For Ubuntu: install ca-certificates so apt HTTPS works
+     */
     private fun configureRootfs(rootfs: File, abi: String) {
         val etcDir = File(rootfs, "etc")
         etcDir.mkdirs()
 
+        // DNS resolver config
         val resolvConf = File(etcDir, "resolv.conf")
         resolvConf.writeText("""
             nameserver 8.8.8.8
@@ -218,39 +241,51 @@ class LinuxEnvironmentManager @Inject constructor(
             options timeout:2 attempts:2
         """.trimIndent())
 
+        // Hostname
         val hostname = File(etcDir, "hostname")
         hostname.writeText("pocketagent\n")
 
+        // Hosts file
         val hosts = File(etcDir, "hosts")
         hosts.writeText("""
             127.0.0.1 localhost
             127.0.1.1 pocketagent
         """.trimIndent() + "\n")
 
+        // Ensure /tmp exists and is writable
         val tmpDir = File(rootfs, "tmp")
         tmpDir.mkdirs()
         tmpDir.setWritable(true, false)
         tmpDir.setReadable(true, false)
         tmpDir.setExecutable(true, false)
 
+        // Ensure /root exists (agent's home inside the container)
         val rootHome = File(rootfs, "root")
         rootHome.mkdirs()
         rootHome.setWritable(true, false)
 
+        // Ensure /var/tmp exists
         val varTmp = File(rootfs, "var/tmp")
         varTmp.mkdirs()
         varTmp.setWritable(true, false)
 
+        // Create a bind-mount source for the workspace
+        // (proot will bind-mount /data/data/.../workspace → /root/workspace)
         val workspaceMount = File(rootHome, "workspace")
         workspaceMount.mkdirs()
     }
 
+    /**
+     * Build the proot command to run a shell command inside the Linux container.
+     *
+     * The workspace is bind-mounted at /root/workspace so the agent's files are
+     * accessible both from inside the container and from the file browser UI.
+     */
     fun buildProotCommand(command: String, workingDir: String? = null): List<String> {
         val prootPath = getProotPath() ?: return listOf("/system/bin/sh", "-c", command)
+
         val cwd = workingDir ?: "/root"
 
-        // The Termux-patched proot binary needs LD_LIBRARY_PATH set to find libtalloc.so.2
-        // We'll set this in the ShellExecutor's environment, not as a command argument.
         return listOf(
             prootPath,
             "--rootfs=${linuxDir.absolutePath}",
@@ -260,13 +295,16 @@ class LinuxEnvironmentManager @Inject constructor(
             "--bind=/sys",
             "--bind=${workspace.homeDir.absolutePath}:/root/workspace",
             "--bind=${workspace.tmpDir.absolutePath}:/tmp",
+            "--bind=/dev/urandom:/dev/random",  // some tools need /dev/random
+            "--kill-on-exit",
             "/bin/sh", "-c", command
         )
     }
 
-    /** The LD_LIBRARY_PATH needed for proot to find libtalloc.so.2. */
-    fun getProotLdLibraryPath(): String = prootLibDir.absolutePath
-
+    /**
+     * Uninstall the Linux environment. Frees ~150MB.
+     * The proot binary is kept (it's small and bundled in the APK anyway).
+     */
     suspend fun uninstall(): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             if (linuxDir.exists()) {
@@ -278,6 +316,9 @@ class LinuxEnvironmentManager @Inject constructor(
         }
     }
 
+    /**
+     * Get diagnostic info about the Linux installation.
+     */
     fun getDiagnosticInfo(): String {
         return buildString {
             appendLine("=== Linux Environment Status ===")
@@ -288,20 +329,28 @@ class LinuxEnvironmentManager @Inject constructor(
             appendLine("proot binary: ${prootBinary.absolutePath}")
             appendLine("  exists: ${prootBinary.exists()}")
             appendLine("  executable: ${if (prootBinary.exists()) prootBinary.canExecute() else false}")
+            appendLine("  size: ${if (prootBinary.exists()) prootBinary.length() else 0} bytes")
             appendLine("")
             appendLine("Linux rootfs: ${linuxDir.absolutePath}")
             appendLine("  exists: ${linuxDir.exists()}")
             if (linuxDir.exists()) {
                 appendLine("  /bin/sh exists: ${File(linuxDir, "bin/sh").exists()}")
-                appendLine("  /usr/bin/sh exists: ${File(linuxDir, "usr/bin/sh").exists()}")
-                appendLine("  /usr/bin/bash exists: ${File(linuxDir, "usr/bin/bash").exists()}")
+                appendLine("  /etc/resolv.conf: ${File(linuxDir, "etc/resolv.conf").exists()}")
                 appendLine("  marker file: ${File(linuxDir, MARKER_FILE).exists()}")
                 val totalSize = linuxDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
                 appendLine("  total size: ${totalSize / (1024 * 1024)} MB")
             }
+            appendLine("")
+            appendLine("Workspace: ${workspace.homeDir.absolutePath}")
+            appendLine("  exists: ${workspace.homeDir.exists()}")
+            val wsSize = workspace.homeDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+            appendLine("  size: ${wsSize / (1024 * 1024)} MB")
         }
     }
 
+    /**
+     * Check available storage. Returns true if at least [requiredMb] MB is free.
+     */
     fun hasEnoughStorage(requiredMb: Long): Boolean {
         val stat = android.os.StatFs(context.filesDir.absolutePath)
         val freeBytes = stat.availableBlocksLong * stat.blockSizeLong
@@ -312,7 +361,7 @@ class LinuxEnvironmentManager @Inject constructor(
         return try {
             val client = OkHttpClient.Builder()
                 .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-                .readTimeout(600, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(600, java.util.concurrent.TimeUnit.SECONDS)  // 10 min for slow connections
                 .build()
             val request = Request.Builder().url(url)
                 .header("User-Agent", "PocketAgent/2.1")
@@ -342,197 +391,38 @@ class LinuxEnvironmentManager @Inject constructor(
         }
     }
 
-    /**
-     * v2.1.1 FIXED: Properly handle symlinks, directories, and regular files.
-     *
-     * The v2.1.0 version had a critical bug: it didn't handle symlinks at all.
-     * Ubuntu 22.04 uses merged-usr where /bin -> /usr/bin, /lib -> /usr/lib, etc.
-     * Without symlinks, /bin/sh was unreachable even though /usr/bin/sh existed.
-     *
-     * This version:
-     *   1. Handles symlinks via java.nio.file.Files.createSymbolicLink()
-     *   2. Strips "./" prefix from Alpine entries
-     *   3. Handles hard links (rare but present in some rootfs)
-     *   4. Sets executable bit based on tar entry mode
-     *   5. Does a two-pass extraction: first directories, then files+symlinks
-     *      (ensures parent dirs exist before creating symlinks)
-     */
-    private fun extractRootfsFixed(
-        archiveFile: File,
-        targetDir: File,
-        onProgress: (String, Long, Long) -> Unit
-    ): Result<Unit> {
-        return try {
-            var entryCount = 0
-            var symlinkCount = 0
-            var fileCount = 0
-            var dirCount = 0
-
-            // Collect all entries first so we can do ordered extraction
-            data class EntryInfo(
-                val name: String,
-                val isDirectory: Boolean,
-                val isSymbolicLink: Boolean,
-                val isHardLink: Boolean,
-                val linkName: String,
-                val mode: Int
-            )
-
-            val entries = mutableListOf<EntryInfo>()
-
-            archiveFile.inputStream().buffered().use { fis ->
-                GzipCompressorInputStream(fis).use { gzis ->
-                    TarArchiveInputStream(gzis).use { tis ->
-                        var entry: TarArchiveEntry? = tis.nextEntry as? TarArchiveEntry
-                        while (entry != null) {
-                            // Strip "./" prefix (Alpine uses it, Ubuntu doesn't)
-                            var name = entry.name
-                            if (name.startsWith("./")) name = name.substring(2)
-                            if (name.isEmpty()) {
-                                entry = tis.nextEntry as? TarArchiveEntry
-                                continue
-                            }
-
-                            // Block path traversal
-                            if (name.contains("..") || name.startsWith("/")) {
-                                entry = tis.nextEntry as? TarArchiveEntry
-                                continue
-                            }
-
-                            entries.add(EntryInfo(
-                                name = name,
-                                isDirectory = entry.isDirectory,
-                                isSymbolicLink = entry.isSymbolicLink,
-                                isHardLink = entry.isLink,  // isLink = hard link in Apache Commons Compress
-                                linkName = entry.linkName,
-                                mode = entry.mode
-                            ))
-
-                            // Copy the file content if it's a regular file (not dir, not symlink, not hardlink)
-                            if (!entry.isDirectory && !entry.isSymbolicLink && !entry.isLink) {
-                                val outFile = File(targetDir, name)
-                                outFile.parentFile?.mkdirs()
-                                FileOutputStream(outFile).use { tis.copyTo(it) }
-                                fileCount++
-                            }
-
-                            entryCount++
-                            if (entryCount % 500 == 0) {
-                                onProgress("Extracting... ($entryCount entries)", -1, -1)
-                            }
-
-                            entry = tis.nextEntry as? TarArchiveEntry
+    private fun extractRootfs(archiveFile: File, targetDir: File) {
+        // Ubuntu/Alpine rootfs is .tar.gz — use Apache Commons Compress for reliable extraction
+        archiveFile.inputStream().buffered().use { fis ->
+            GzipCompressorInputStream(fis).use { gzis ->
+                TarArchiveInputStream(gzis).use { tis ->
+                    var entry = tis.nextEntry
+                    while (entry != null) {
+                        val entryPath = entry.name
+                        // Block path traversal
+                        if (entryPath.contains("..") || entryPath.startsWith("/")) {
+                            entry = tis.nextEntry
+                            continue
                         }
-                    }
-                }
-            }
-
-            // Now create directories and symlinks in order
-            // First: create all directories
-            for (e in entries) {
-                if (e.isDirectory) {
-                    val dir = File(targetDir, e.name)
-                    dir.mkdirs()
-                    dirCount++
-                }
-            }
-
-            // Second: create all symlinks
-            for (e in entries) {
-                if (e.isSymbolicLink) {
-                    val linkFile = File(targetDir, e.name)
-                    val linkPath: Path = linkFile.toPath()
-                    val target: Path = Paths.get(e.linkName)
-
-                    // Delete existing file/directory at link path (might be a 0-byte file from a previous failed install)
-                    if (linkFile.exists()) {
-                        linkFile.delete()
-                    }
-                    // Also check for broken symlinks
-                    if (Files.isSymbolicLink(linkPath)) {
-                        Files.delete(linkPath)
-                    }
-
-                    try {
-                        // Create parent directories if they don't exist
-                        linkFile.parentFile?.mkdirs()
-                        Files.createSymbolicLink(linkPath, target)
-                        symlinkCount++
-                    } catch (ex: Exception) {
-                        // If symlink creation fails (e.g., permission denied on some Android versions),
-                        // create a copy of the target instead. This won't work for directory symlinks
-                        // (like bin -> usr/bin) but at least file symlinks will work.
-                        try {
-                            val targetFile = File(targetDir, e.linkName)
-                            if (targetFile.isFile) {
-                                targetFile.copyTo(linkFile, overwrite = true)
-                                symlinkCount++
+                        val outFile = File(targetDir, entryPath)
+                        if (entry.isDirectory) {
+                            outFile.mkdirs()
+                        } else {
+                            outFile.parentFile?.mkdirs()
+                            FileOutputStream(outFile).use { tis.copyTo(it) }
+                            // Preserve executable bit for binaries
+                            if (entryPath.startsWith("bin/") || entryPath.startsWith("usr/bin/") ||
+                                entryPath.startsWith("sbin/") || entryPath.startsWith("usr/sbin/") ||
+                                entryPath.startsWith("usr/libexec/")) {
+                                outFile.setExecutable(true, false)
                             }
-                        } catch (_: Exception) {
-                            // Last resort: create an empty file so the path exists
-                            linkFile.createNewFile()
+                            // Make everything readable
+                            outFile.setReadable(true, false)
                         }
+                        entry = tis.nextEntry
                     }
                 }
             }
-
-            // Third: set executable permissions on binaries
-            for (e in entries) {
-                if (!e.isDirectory && !e.isSymbolicLink) {
-                    val file = File(targetDir, e.name)
-                    if (file.isFile) {
-                        // Check if the file has execute permission in the tar entry
-                        if ((e.mode and 0b001_000_000) != 0 || // owner execute
-                            (e.mode and 0b000_001_000) != 0 || // group execute
-                            (e.mode and 0b000_000_001) != 0    // others execute
-                        ) {
-                            file.setExecutable(true, false)
-                        }
-                        file.setReadable(true, false)
-                    }
-                }
-            }
-
-            // Verify critical symlinks exist
-            val binDir = File(targetDir, "bin")
-            if (!binDir.exists()) {
-                // If /bin doesn't exist (maybe symlink creation failed), create it as a real directory
-                // and populate it by copying from usr/bin
-                binDir.mkdirs()
-                val usrBin = File(targetDir, "usr/bin")
-                if (usrBin.exists()) {
-                    // At minimum, copy sh
-                    val sh = File(usrBin, "sh")
-                    if (sh.exists()) {
-                        sh.copyTo(File(binDir, "sh"), overwrite = true)
-                        File(binDir, "sh").setExecutable(true, false)
-                    }
-                    val bash = File(usrBin, "bash")
-                    if (bash.exists()) {
-                        bash.copyTo(File(binDir, "bash"), overwrite = true)
-                        File(binDir, "bash").setExecutable(true, false)
-                    }
-                }
-            }
-
-            // Ensure /bin/sh is executable (it might be a symlink to dash)
-            val binSh = File(targetDir, "bin/sh")
-            if (binSh.exists()) {
-                binSh.setExecutable(true, false)
-            }
-
-            // Also create /tmp if it doesn't exist (some rootfs don't include it)
-            val tmpDir = File(targetDir, "tmp")
-            if (!tmpDir.exists()) {
-                tmpDir.mkdirs()
-            }
-            tmpDir.setWritable(true, false)
-            tmpDir.setReadable(true, false)
-            tmpDir.setExecutable(true, false)
-
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(IOException("Extraction failed: ${e.message}", e))
         }
     }
 }
