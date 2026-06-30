@@ -237,31 +237,22 @@ fun FileBrowserScreen(
                                 }
                             }
                             if (!entry.isDirectory) {
-                                // Download/share button
+                                // M20 FIX: Save to Downloads via MediaStore (was using share sheet)
                                 IconButton(onClick = {
-                                    val filePath = viewModel.downloadFile(entry.path)
-                                    if (filePath != null) {
-                                        val file = java.io.File(filePath)
-                                        val uri = androidx.core.content.FileProvider.getUriForFile(
-                                            context,
-                                            "${context.packageName}.fileprovider",
-                                            file
-                                        )
-                                        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                                            type = context.contentResolver.getType(uri) ?: "*/*"
-                                            putExtra(android.content.Intent.EXTRA_STREAM, uri)
-                                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    val path = entry.path
+                                    val ctx = context
+                                    kotlinx.coroutines.GlobalScope.launch {
+                                        val result = viewModel.saveToDownloads(path, ctx)
+                                        if (result != null) {
+                                            Toast.makeText(ctx, "Saved to Downloads: ${entry.name}", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            Toast.makeText(ctx, "Failed to save ${entry.name}", Toast.LENGTH_SHORT).show()
                                         }
-                                        val chooser = android.content.Intent.createChooser(intent, "Download ${entry.name}")
-                                        chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        context.startActivity(chooser)
-                                    } else {
-                                        Toast.makeText(context, "Cannot download file", Toast.LENGTH_SHORT).show()
                                     }
                                 }) {
                                     Icon(
                                         Icons.Filled.Download,
-                                        contentDescription = "Download",
+                                        contentDescription = "Save to Downloads",
                                         tint = ext.accent,
                                         modifier = Modifier.size(18.dp)
                                     )

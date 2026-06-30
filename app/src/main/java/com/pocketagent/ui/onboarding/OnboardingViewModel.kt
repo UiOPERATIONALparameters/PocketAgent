@@ -22,8 +22,10 @@ import javax.inject.Inject
 
 data class OnboardingState(
     val step: OnboardingStep = OnboardingStep.PROVIDER,
-    val providerName: String = "My Gateway",
-    val gatewayUrl: String = "https://api.gateway.orgn.com/v1",
+    val providerName: String = "OpenAI",
+    // C9 FIX: was 'https://api.gateway.orgn.com/v1' (previous AI's private test gateway).
+    // Now defaults to empty — user must pick a provider from the presets.
+    val gatewayUrl: String = "",
     val apiKey: String = "",
     val testing: Boolean = false,
     val saving: Boolean = false,
@@ -34,6 +36,22 @@ data class OnboardingState(
 ) {
     enum class OnboardingStep { WELCOME, PROVIDER, MODEL, SAVING, DONE }
 }
+
+/** Built-in provider presets for the onboarding dropdown. */
+val PROVIDER_PRESETS = listOf(
+    ProviderPreset("OpenAI", "https://api.openai.com/v1", "sk-..."),
+    ProviderPreset("OpenRouter", "https://openrouter.ai/api/v1", "sk-or-..."),
+    ProviderPreset("z.ai (GLM)", "https://open.bigmodel.cn/api/paas/v4", "..."),
+    ProviderPreset("DeepSeek", "https://api.deepseek.com/v1", "sk-..."),
+    ProviderPreset("Groq", "https://api.groq.com/openai/v1", "gsk_..."),
+    ProviderPreset("Together AI", "https://api.together.xyz/v1", "..."),
+    ProviderPreset("Mistral", "https://api.mistral.ai/v1", "..."),
+    ProviderPreset("Ollama (local)", "http://10.0.2.2:11434/v1", ""),  // emulator: host loopback
+    ProviderPreset("LM Studio (local)", "http://10.0.2.2:1234/v1", ""),
+    ProviderPreset("Custom", "", "")
+)
+
+data class ProviderPreset(val name: String, val baseUrl: String, val keyHint: String)
 
 sealed class OnboardingEvent {
     data object NavigateToChat : OnboardingEvent()
@@ -82,6 +100,26 @@ class OnboardingViewModel @Inject constructor(
 
     fun onApiKeyChange(key: String) {
         _state.update { it.copy(apiKey = key) }
+    }
+
+    /** M18 FIX: advance from WELCOME step to PROVIDER step. */
+    fun advanceFromWelcome() {
+        _state.update {
+            if (it.step == OnboardingState.OnboardingStep.WELCOME) {
+                it.copy(step = OnboardingState.OnboardingStep.PROVIDER)
+            } else it
+        }
+    }
+
+    /** Apply a provider preset (from the dropdown in onboarding). */
+    fun applyPreset(preset: com.pocketagent.ui.onboarding.ProviderPreset) {
+        _state.update {
+            it.copy(
+                providerName = preset.name,
+                gatewayUrl = preset.baseUrl,
+                apiKey = if (preset.baseUrl.isEmpty()) "" else it.apiKey  // don't clear key if switching URLs
+            )
+        }
     }
 
     fun testConnection() {

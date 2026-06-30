@@ -519,8 +519,12 @@ class ChatViewModel @Inject constructor(
     private fun startAgentService(statusText: String) {
         try {
             val intent = android.content.Intent(appContext, com.pocketagent.service.AgentForegroundService::class.java)
-            intent.putExtra("status_text", statusText)
-            appContext.startService(intent)
+            intent.putExtra(com.pocketagent.service.AgentForegroundService.EXTRA_STATUS_TEXT, statusText)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                appContext.startForegroundService(intent)
+            } else {
+                appContext.startService(intent)
+            }
         } catch (_: Exception) {
             // Foreground service might fail on some devices — not critical
         }

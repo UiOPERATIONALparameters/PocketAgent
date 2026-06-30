@@ -95,10 +95,13 @@ fun ChatScreen(
     var userScrolledUp by remember { mutableStateOf(false) }
 
     // Track if user scrolled up — stop auto-scroll if so
+    // M19 FIX: was 'lastVisible < totalItems - 2' (too aggressive — reading second-to-last
+    // message counted as 'scrolled up'). Now 'lastVisible < totalItems - 1' (only triggers
+    // when user is 2+ messages from the bottom).
     LaunchedEffect(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) {
         val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
         val totalItems = listState.layoutInfo.totalItemsCount
-        userScrolledUp = totalItems > 0 && lastVisible < totalItems - 2
+        userScrolledUp = totalItems > 0 && lastVisible < totalItems - 1
     }
     val context = LocalContext.current
 

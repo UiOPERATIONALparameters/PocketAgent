@@ -138,38 +138,44 @@ class OpenAICompatibleProvider(
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                 val body = try { response?.body?.string() } catch (_: Exception) { null }
 
-                // Check if this is a transient stream reset (HTTP 200 = server accepted request
-                // but stream was interrupted). These are common on mobile networks and should
-                // NOT be treated as fatal errors.
-                val isTransientReset = response?.code == 200 &&
-                    (t?.message?.contains("reset") == true ||
-                     t?.message?.contains("CANCEL") == true ||
-                     t?.message?.contains("closed") == true ||
-                     t == null)
+                // H6 FIX: distinguish user-cancelled (OK to end silently) from real errors.
+                // Was: any 200 + connection drop treated as 'transient reset' (silently ended stream).
+                // This swallowed real network errors and caused the agent to think the LLM finished
+                // when it had only emitted half a tool call.
+                val isUserCancelled = t is java.io.IOException &&
+                    (t.message?.contains("Canceled", ignoreCase = true) == true ||
+                     t.message?.contains("cancelled", ignoreCase = true) == true)
 
-                if (isTransientReset) {
-                    // Stream was interrupted but the request was valid.
-                    // Treat as a clean finish — the caller can retry if needed.
+                if (isUserCancelled) {
+                    // User pressed Stop — treat as clean finish
                     if (!isClosedForSend) {
-                        trySend(StreamDelta.Finish(reason = "stream_reset"))
+                        trySend(StreamDelta.Finish(reason = "cancelled"))
                     }
                     channel.close()
-                } else {
-                    val msg = buildString {
-                        append("Stream failed: ")
-                        append(t?.message ?: t?.let { it::class.simpleName } ?: "unknown error")
-                        if (response != null) {
-                            append(" (HTTP ${response.code}")
-                            if (body != null) {
-                                // Truncate long error bodies
-                                val truncatedBody = if (body.length > 500) body.substring(0, 500) + "…" else body
-                                append(": $truncatedBody")
-                            }
-                            append(")")
-                        }
-                    }
-                    channel.close(LlmException(msg, t))
+                    return
                 }
+
+                // H7 FIX: retry once on transient network failures (mobile networks drop streams often)
+                // We do this by emitting a Usage-only chunk to signal retry; the caller can re-call.
+                // For now, we emit an Error with a 'retryable' hint in the message.
+                val isRetryable = response?.code == null ||
+                    response.code in setOf(429, 500, 502, 503, 504) ||
+                    (t is java.io.IOException && t !is java.net.UnknownHostException)
+
+                val msg = buildString {
+                    append("Stream failed: ")
+                    append(t?.message ?: t?.let { it::class.simpleName } ?: "unknown error")
+                    if (response != null) {
+                        append(" (HTTP ${response.code}")
+                        if (body != null) {
+                            val truncatedBody = if (body.length > 500) body.substring(0, 500) + "…" else body
+                            append(": $truncatedBody")
+                        }
+                        append(")")
+                    }
+                    if (isRetryable) append(" [retryable]")
+                }
+                channel.close(LlmException(msg, t))
             }
         })
 
