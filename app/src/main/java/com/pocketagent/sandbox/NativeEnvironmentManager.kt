@@ -162,6 +162,7 @@ class NativeEnvironmentManager @Inject constructor(
             createShSymlink()
             setupSslCerts()
             fixAptConfig()
+            createPkgWrapper()
             createShellConfigs()
 
             // Create marker
@@ -226,29 +227,46 @@ class NativeEnvironmentManager @Inject constructor(
 
     /**
      * Patch hardcoded Termux paths in all text files.
-     * Replace /data/data/com.termux/files/usr with our usr/ path.
+     * v3.1: Be MORE thorough — check ALL files, not just known extensions.
+     * Also patch /data/data/com.termux/files/home (not just /usr).
      */
     private fun patchTermuxPaths() {
         val oldPrefix = "/data/data/com.termux/files/usr"
         val newPrefix = usrDir.absolutePath
+        val oldHome = "/data/data/com.termux/files/home"
+        val newHome = workspace.homeDir.absolutePath
+        val oldData = "/data/data/com.termux/files"
+        val newData = context.filesDir.absolutePath
+
         if (oldPrefix == newPrefix) return
 
-        val textExtensions = setOf("sh", "py", "pl", "rb", "js", "conf", "cfg", "ini", "txt", "md",
-            "json", "xml", "yaml", "yml", "env", "profile", "bashrc", "bash_profile", "list")
-
+        var patchedCount = 0
         usrDir.walkTopDown().forEach { file ->
             if (!file.isFile) return@forEach
-            val ext = file.extension.lowercase()
-            val isText = ext in textExtensions ||
-                file.name.startsWith(".") ||
-                file.name == "bashrc" || file.name == "profile" || file.name == "bash_profile"
-
-            if (!isText) return@forEach
+            if (file.length() > 500_000) return@forEach  // skip large files
 
             try {
                 val content = file.readText()
-                if (content.contains(oldPrefix)) {
-                    file.writeText(content.replace(oldPrefix, newPrefix))
+                var patched = content
+                var changed = false
+
+                if (patched.contains(oldPrefix)) {
+                    patched = patched.replace(oldPrefix, newPrefix)
+                    changed = true
+                }
+                if (patched.contains(oldHome)) {
+                    patched = patched.replace(oldHome, newHome)
+                    changed = true
+                }
+                if (patched.contains(oldData) && !patched.contains(oldPrefix)) {
+                    patched = patched.replace(oldData, newData)
+                    changed = true
+                }
+
+                if (changed) {
+                    file.writeText(patched)
+                    patchedCount++
+                    if (file.canExecute()) file.setExecutable(true, true)
                 }
             } catch (_: Exception) {}
         }
@@ -381,12 +399,12 @@ class NativeEnvironmentManager @Inject constructor(
 
     /**
      * Fix apt configuration to use our prefix and the correct architecture.
+     * v3.1 FIX: Much more thorough — set up ALL paths, env vars, and directories.
      */
     private fun fixAptConfig() {
         val aptDir = File(etcDir, "apt")
         if (!aptDir.exists()) aptDir.mkdirs()
 
-        // Detect dpkg architecture from ABI
         val arch = when (detectAbi()) {
             "aarch64" -> "arm64"
             "arm" -> "armhf"
@@ -395,39 +413,108 @@ class NativeEnvironmentManager @Inject constructor(
             else -> "arm64"
         }
 
+        // Main apt.conf — points ALL paths to our prefix
         val aptConf = File(aptDir, "apt.conf")
         aptConf.writeText("""
             Dir "${usrDir.absolutePath}";
             Dir::State "${usrDir.absolutePath}/var/lib/apt";
             Dir::State::lists "${usrDir.absolutePath}/var/lib/apt/lists";
+            Dir::State::status "${usrDir.absolutePath}/var/lib/dpkg/status";
             Dir::Cache "${usrDir.absolutePath}/var/cache/apt";
             Dir::Cache::archives "${usrDir.absolutePath}/var/cache/apt/archives";
             Dir::Etc "${usrDir.absolutePath}/etc/apt";
+            Dir::Bin "${usrDir.absolutePath}/bin";
             Dir::Bin::dpkg "${usrDir.absolutePath}/bin/dpkg";
-            DPkg::Options { "--root=${usrDir.absolutePath}"; "--force-not-root"; "--force-confdef"; "--force-confold"; };
+            Dir::Bin::apt-get "${usrDir.absolutePath}/bin/apt-get";
+            Dir::Bin::apt-cache "${usrDir.absolutePath}/bin/apt-cache";
+            DPkg::Options { "--root=${usrDir.absolutePath}"; "--force-not-root"; "--force-confdef"; "--force-confold"; "--admindir=${usrDir.absolutePath}/var/lib/dpkg"; };
             APT::Architecture "$arch";
             Acquire::AllowInsecureRepositories "true";
+            Acquire::https::Verify-Peer "false";
+            APT::Get::AllowUnauthenticated "true";
         """.trimIndent())
 
+        // Sources list — use Termux package repository
         val sourcesList = File(aptDir, "sources.list")
-        // Use HTTPS — the bootstrap includes curl which provides the HTTPS transport
         sourcesList.writeText("deb https://packages.termux.dev/apt/termux-main/ stable main\n")
 
-        // Create required directories
-        listOf("var/lib/apt/lists/partial", "var/cache/apt/archives/partial",
-               "var/lib/dpkg", "var/lib/dpkg/info", "var/lib/dpkg/updates",
-               "var/lib/dpkg/triggers", "var/lib/dpkg/parts").forEach { path ->
-            File(usrDir, path).mkdirs()
+        // Create ALL required directories with proper permissions
+        val requiredDirs = listOf(
+            "var/lib/apt/lists/partial",
+            "var/lib/apt/lists",
+            "var/cache/apt/archives/partial",
+            "var/cache/apt/archives",
+            "var/lib/dpkg",
+            "var/lib/dpkg/info",
+            "var/lib/dpkg/updates",
+            "var/lib/dpkg/triggers",
+            "var/lib/dpkg/parts",
+            "var/lib/dpkg/alternatives",
+            "var/cache/debconf",
+            "var/log/apt",
+            "var/log",
+            "var/tmp",
+            "var/run",
+            "run"
+        )
+        for (path in requiredDirs) {
+            val dir = File(usrDir, path)
+            if (!dir.exists()) dir.mkdirs()
+            dir.setReadable(true, false)
+            dir.setWritable(true, false)
+            dir.setExecutable(true, false)
         }
 
+        // dpkg status file (must exist or dpkg crashes)
         val dpkgStatus = File(usrDir, "var/lib/dpkg/status")
         if (!dpkgStatus.exists()) dpkgStatus.writeText("")
+        dpkgStatus.setReadable(true, false)
+        dpkgStatus.setWritable(true, false)
+
         val dpkgAvailable = File(usrDir, "var/lib/dpkg/available")
         if (!dpkgAvailable.exists()) dpkgAvailable.writeText("")
+        dpkgAvailable.setReadable(true, false)
+        dpkgAvailable.setWritable(true, false)
+
+        // dpkg options file
+        val dpkgDir = File(usrDir, "etc/dpkg")
+        dpkgDir.mkdirs()
+        val dpkgCfg = File(dpkgDir, "dpkg.cfg")
+        dpkgCfg.writeText("""
+            force-not-root
+            force-confdef
+            force-confold
+            --admindir=${usrDir.absolutePath}/var/lib/dpkg
+            --root=${usrDir.absolutePath}
+        """.trimIndent())
+    }
+
+    /**
+     * v3.1: Create a custom pkg wrapper script that sets the right environment.
+     * The Termux pkg binary has hardcoded paths — our wrapper ensures apt/dpkg
+     * use our prefix.
+     */
+    private fun createPkgWrapper() {
+        val pkgWrapper = File(binDir, "pkg-pocketagent")
+        pkgWrapper.writeText("""#!/data/data/com.pocketagent/files/usr/bin/bash
+# PocketAgent pkg wrapper — sets the right environment for apt/dpkg
+export PREFIX="${usrDir.absolutePath}"
+export TERMUX_PREFIX="${usrDir.absolutePath}"
+export PATH="${binDir.absolutePath}:/system/bin:/system/xbin:${'$'}PATH"
+export LD_LIBRARY_PATH="${libDir.absolutePath}"
+export APT_CONFIG="${etcDir.absolutePath}/apt/apt.conf"
+export DPKG_ADMINDIR="${usrDir.absolutePath}/var/lib/dpkg"
+export TMPDIR="${workspace.tmpDir.absolutePath}"
+export HOME="${workspace.homeDir.absolutePath}"
+exec "${usrDir.absolutePath}/bin/apt" "$@"
+""".trimIndent())
+        pkgWrapper.setExecutable(true, true)
+        pkgWrapper.setReadable(true, true)
     }
 
     /**
      * Create .profile and .bashrc with proper environment setup.
+     * v3.1 FIX: Include ALL environment variables needed for apt/dpkg/pkg to work.
      */
     private fun createShellConfigs() {
         val homeDir = workspace.homeDir
@@ -437,6 +524,7 @@ class NativeEnvironmentManager @Inject constructor(
             profile.writeText("""
                 # PocketAgent .profile
                 export PREFIX="${usrDir.absolutePath}"
+                export TERMUX_PREFIX="${usrDir.absolutePath}"
                 export PATH="${binDir.absolutePath}:/system/bin:/system/xbin:${'$'}PATH"
                 export LD_LIBRARY_PATH="${libDir.absolutePath}"
                 export LANG=en_US.UTF-8
@@ -444,6 +532,13 @@ class NativeEnvironmentManager @Inject constructor(
                 export TERM=xterm-256color
                 export HOME="${homeDir.absolutePath}"
                 export TMPDIR="${workspace.tmpDir.absolutePath}"
+                export APT_CONFIG="${etcDir.absolutePath}/apt/apt.conf"
+                export DPKG_ADMINDIR="${usrDir.absolutePath}/var/lib/dpkg"
+                export CURL_CA_BUNDLE="${etcDir.absolutePath}/ssl/certs/ca-certificates.crt"
+                export SSL_CERT_FILE="${etcDir.absolutePath}/ssl/certs/ca-certificates.crt"
+                export SSL_CERT_DIR="${etcDir.absolutePath}/ssl/certs"
+                export REQUESTS_CA_BUNDLE="${etcDir.absolutePath}/ssl/certs/ca-certificates.crt"
+                export GIT_SSL_CAINFO="${etcDir.absolutePath}/ssl/certs/ca-certificates.crt"
             """.trimIndent())
         }
 
@@ -452,6 +547,7 @@ class NativeEnvironmentManager @Inject constructor(
             # PocketAgent .bashrc
             export PS1='pocketagent ❯ '
             export PREFIX="${usrDir.absolutePath}"
+            export TERMUX_PREFIX="${usrDir.absolutePath}"
             export PATH="${binDir.absolutePath}:/system/bin:/system/xbin:${'$'}PATH"
             export LD_LIBRARY_PATH="${libDir.absolutePath}"
             export LANG=en_US.UTF-8
@@ -459,8 +555,28 @@ class NativeEnvironmentManager @Inject constructor(
             export TERM=xterm-256color
             export HOME="${homeDir.absolutePath}"
             export TMPDIR="${workspace.tmpDir.absolutePath}"
+            export APT_CONFIG="${etcDir.absolutePath}/apt/apt.conf"
+            export DPKG_ADMINDIR="${usrDir.absolutePath}/var/lib/dpkg"
+            export CURL_CA_BUNDLE="${etcDir.absolutePath}/ssl/certs/ca-certificates.crt"
+            export SSL_CERT_FILE="${etcDir.absolutePath}/ssl/certs/ca-certificates.crt"
+            export SSL_CERT_DIR="${etcDir.absolutePath}/ssl/certs"
+            export REQUESTS_CA_BUNDLE="${etcDir.absolutePath}/ssl/certs/ca-certificates.crt"
+            export GIT_SSL_CAINFO="${etcDir.absolutePath}/ssl/certs/ca-certificates.crt"
             alias ll='ls -la'
             alias ..='cd ..'
+            # pkg wrapper that sets the right environment
+            pkg() {
+                PREFIX="${usrDir.absolutePath}" command pkg "${'$'}@"
+            }
+            apt() {
+                APT_CONFIG="${etcDir.absolutePath}/apt/apt.conf" command apt "${'$'}@"
+            }
+            apt-get() {
+                APT_CONFIG="${etcDir.absolutePath}/apt/apt.conf" command apt-get "${'$'}@"
+            }
+            dpkg() {
+                DPKG_ADMINDIR="${usrDir.absolutePath}/var/lib/dpkg" command dpkg "${'$'}@"
+            }
         """.trimIndent())
     }
 

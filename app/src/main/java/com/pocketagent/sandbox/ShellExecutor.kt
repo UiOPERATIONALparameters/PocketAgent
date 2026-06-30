@@ -78,10 +78,13 @@ class ShellExecutor @Inject constructor(
         env["TMPDIR"] = workspace.tmpDir.absolutePath
 
         if (useNative) {
-            // Set PATH, LD_LIBRARY_PATH, PREFIX for native environment
+            // v3.1 FIX: Set ALL environment variables needed for native execution
             env["PATH"] = nativeEnv.getPath()
             env["LD_LIBRARY_PATH"] = nativeEnv.libDir.absolutePath
             env["PREFIX"] = nativeEnv.usrDir.absolutePath
+            env["TERMUX_PREFIX"] = nativeEnv.usrDir.absolutePath
+            env["APT_CONFIG"] = "${nativeEnv.etcDir.absolutePath}/apt/apt.conf"
+            env["DPKG_ADMINDIR"] = "${nativeEnv.usrDir.absolutePath}/var/lib/dpkg"
 
             // SSL certificate paths
             val certDir = File(nativeEnv.etcDir, "ssl/certs")
