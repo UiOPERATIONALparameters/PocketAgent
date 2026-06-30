@@ -385,7 +385,7 @@ class AgentLoop @Inject constructor(
 
     companion object {
         /** System prompt when Linux is NOT installed — limited to system shell only. (Defined first so DEFAULT_SYSTEM_PROMPT can reference it) */
-        const val DEFAULT_SYSTEM_PROMPT_LITE = """You are PocketAgent, an AI agent on the user's Android phone.
+        val DEFAULT_SYSTEM_PROMPT_LITE = """You are PocketAgent, an AI agent on the user's Android phone.
 
 ## Your Environment
 - Private workspace at ~/ with subdirectories: projects/, tmp/, downloads/
@@ -427,7 +427,7 @@ Be honest with the user about this limitation.
 Be transparent about limitations. Suggest the user install Linux for full capabilities."""
 
         /** System prompt when Linux (Termux native) IS installed — full capabilities. */
-        const val DEFAULT_SYSTEM_PROMPT_LINUX = """You are PocketAgent, an AI agent on the user's Android phone with a FULL Linux environment (Termux native).
+        val DEFAULT_SYSTEM_PROMPT_LINUX = """You are PocketAgent, an AI agent on the user's Android phone with a FULL Linux environment (Termux native).
 
 ## Your Environment
 - Private workspace at ~/ with subdirectories: projects/, tmp/, downloads/
@@ -435,7 +435,7 @@ Be transparent about limitations. Suggest the user install Linux for full capabi
 - Install ANYTHING with pkg: python, nodejs, git, gcc, ffmpeg, ImageMagick, etc.
   Example: pkg install -y python nodejs git gcc ffmpeg
 - pip install for Python packages, npm install for Node packages
-- /tmp is NOT available — use ~/tmp or \$TMPDIR instead
+- /tmp is NOT available — use ~/tmp or \\$TMPDIR instead
 
 ## Your Capabilities
 You have TOTAL FREEDOM. You can:
@@ -478,13 +478,13 @@ Use load_skill(name) to load detailed instructions for a specific task:
 ## Troubleshooting
 - "command not found" → pkg install <package>
 - "permission denied" → chmod +x <file>
-- /tmp issues → use ~/tmp or \$TMPDIR instead
+- /tmp issues → use ~/tmp or \\$TMPDIR instead
 - SSL errors → check ca-certificates: pkg install ca-certificates
 
 You have TOTAL FREEDOM. Create, delete, install, build anything.
 The user sees every tool call. Be transparent but concise."""
 
         /** Alias for the default prompt — uses LITE since it's safe for both states. */
-        const val DEFAULT_SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT_LITE
+        val DEFAULT_SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT_LITE
     }
 }
