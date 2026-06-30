@@ -158,11 +158,12 @@ class NativeEnvironmentManager @Inject constructor(
             onProgress("Configuring...", -1, -1)
             patchTermuxPaths()
             patchShebangs()
+            patchAllScripts()  // v3.6: patch ALL scripts in bin/ (including extensionless ones like pkg)
             createSoSymlinks()
             createShSymlink()
             setupSslCerts()
             fixAptConfig()
-            createPkgWrapper()
+            createCommandWrappers()  // v3.6: replace pkg/apt/dpkg with environment-setting wrappers
             createShellConfigs()
 
             // Create marker
@@ -487,6 +488,173 @@ class NativeEnvironmentManager @Inject constructor(
             --admindir=${usrDir.absolutePath}/var/lib/dpkg
             --root=${usrDir.absolutePath}
         """.trimIndent())
+    }
+
+    /**
+     * v3.6: Patch ALL scripts in bin/ — including extensionless ones like `pkg`, `termux-setup-package-manager`, etc.
+     * The patchTermuxPaths() whitelist missed these because they have no file extension.
+     * This function checks every file in bin/ — if it's a script (starts with #!) AND contains
+     * /data/data/com.termux, it patches the content.
+     */
+    private fun patchAllScripts() {
+        val oldPrefix = "/data/data/com.termux/files/usr"
+        val newPrefix = usrDir.absolutePath
+        val oldHome = "/data/data/com.termux/files/home"
+        val newHome = workspace.homeDir.absolutePath
+        val oldData = "/data/data/com.termux/files"
+        val newData = context.filesDir.absolutePath
+
+        if (!binDir.exists()) return
+
+        binDir.listFiles()?.forEach { file ->
+            if (!file.isFile) return@forEach
+            try {
+                // Read first 2 bytes to check if it's a script
+                val header = ByteArray(2)
+                file.inputStream().use { it.read(header) }
+                if (header[0] != '#'.code.toByte() || header[1] != '!'.code.toByte()) return@forEach
+
+                // It's a script — read as bytes, patch, write as bytes
+                val bytes = file.readBytes()
+                val content = String(bytes, Charsets.UTF_8)
+                var patched = content
+                var changed = false
+
+                if (patched.contains(oldPrefix)) {
+                    patched = patched.replace(oldPrefix, newPrefix)
+                    changed = true
+                }
+                if (patched.contains(oldHome)) {
+                    patched = patched.replace(oldHome, newHome)
+                    changed = true
+                }
+                if (patched.contains(oldData) && !patched.contains(oldPrefix)) {
+                    patched = patched.replace(oldData, newData)
+                    changed = true
+                }
+
+                if (changed) {
+                    file.writeBytes(patched.toByteArray(Charsets.UTF_8))
+                    file.setExecutable(true, true)
+                    file.setReadable(true, true)
+                }
+            } catch (_: Exception) {}
+        }
+
+        // Also patch scripts in etc/profile.d/
+        val profileDir = File(etcDir, "profile.d")
+        if (profileDir.exists()) {
+            profileDir.listFiles()?.forEach { file ->
+                if (!file.isFile) return@forEach
+                try {
+                    val bytes = file.readBytes()
+                    val content = String(bytes, Charsets.UTF_8)
+                    var patched = content
+                    var changed = false
+
+                    if (patched.contains(oldPrefix)) {
+                        patched = patched.replace(oldPrefix, newPrefix)
+                        changed = true
+                    }
+                    if (patched.contains(oldData)) {
+                        patched = patched.replace(oldData, newData)
+                        changed = true
+                    }
+
+                    if (changed) {
+                        file.writeBytes(patched.toByteArray(Charsets.UTF_8))
+                        file.setExecutable(true, true)
+                        file.setReadable(true, true)
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    /**
+     * v3.6: Replace pkg/apt/apt-get/dpkg with wrapper scripts that set up the FULL environment
+     * before calling the real binaries. This is the BULLETPROOF fix for hardcoded paths.
+     *
+     * The approach:
+     *   1. Rename original: apt → apt.real, pkg → pkg.real, etc.
+     *   2. Create wrapper script that sets LD_PRELOAD + all env vars + calls apt.real
+     *   3. The wrapper ensures EVERY invocation has the right environment
+     *
+     * This fixes both:
+     *   - Script-based commands (pkg, termux-setup-package-manager) — wrapper sets env before calling
+     *   - Binary-based commands (apt, dpkg) — LD_PRELOAD in wrapper intercepts execve()
+     */
+    private fun createCommandWrappers() {
+        val termuxExecLib = File(libDir, "libtermux-exec-ld-preload.so")
+        val bashPath = File(binDir, "bash").absolutePath
+
+        // The full environment setup that every wrapper uses
+        val envSetup = buildString {
+            appendLine("export PREFIX=\"${usrDir.absolutePath}\"")
+            appendLine("export TERMUX_PREFIX=\"${usrDir.absolutePath}\"")
+            appendLine("export TERMUX_APP__DATA_DIR=\"${context.filesDir.absolutePath}\"")
+            appendLine("export TERMUX_ANDROID_HOME=\"${workspace.homeDir.absolutePath}\"")
+            appendLine("export TERMUX_HOME=\"${workspace.homeDir.absolutePath}\"")
+            appendLine("export PATH=\"${binDir.absolutePath}:/system/bin:/system/xbin:\$PATH\"")
+            appendLine("export LD_LIBRARY_PATH=\"${libDir.absolutePath}\"")
+            if (termuxExecLib.exists()) {
+                appendLine("export LD_PRELOAD=\"${termuxExecLib.absolutePath}\"")
+            }
+            appendLine("export APT_CONFIG=\"${etcDir.absolutePath}/apt/apt.conf\"")
+            appendLine("export DPKG_ADMINDIR=\"${usrDir.absolutePath}/var/lib/dpkg\"")
+            appendLine("export TMPDIR=\"${workspace.tmpDir.absolutePath}\"")
+            appendLine("export HOME=\"${workspace.homeDir.absolutePath}\"")
+            val caBundle = File(etcDir, "ssl/certs/ca-certificates.crt")
+            if (caBundle.exists()) {
+                appendLine("export CURL_CA_BUNDLE=\"${caBundle.absolutePath}\"")
+                appendLine("export SSL_CERT_FILE=\"${caBundle.absolutePath}\"")
+                appendLine("export GIT_SSL_CAINFO=\"${caBundle.absolutePath}\"")
+            }
+        }
+
+        // Wrap each command
+        val commandsToWrap = listOf("apt", "apt-get", "dpkg", "pkg", "apt-cache")
+        for (cmd in commandsToWrap) {
+            val original = File(binDir, cmd)
+            if (!original.exists()) continue
+
+            // Rename original to cmd.real
+            val realFile = File(binDir, "$cmd.real")
+            if (!realFile.exists()) {
+                original.renameTo(realFile)
+                realFile.setExecutable(true, true)
+                realFile.setReadable(true, true)
+            }
+
+            // Create wrapper script
+            val wrapper = File(binDir, cmd)
+            wrapper.writeText("""#!$bashPath
+# PocketAgent wrapper for $cmd — sets up full environment before calling $cmd.real
+$envSetup
+exec "${realFile.absolutePath}" "$@"
+""".trimIndent())
+            wrapper.setExecutable(true, true)
+            wrapper.setReadable(true, true)
+        }
+
+        // Also wrap termux-setup-package-manager if it exists
+        val tspm = File(binDir, "termux-setup-package-manager")
+        if (tspm.exists()) {
+            val tspmReal = File(binDir, "termux-setup-package-manager.real")
+            if (!tspmReal.exists()) {
+                tspm.renameTo(tspmReal)
+                tspmReal.setExecutable(true, true)
+                tspmReal.setReadable(true, true)
+            }
+            val wrapper = File(binDir, "termux-setup-package-manager")
+            wrapper.writeText("""#!$bashPath
+# PocketAgent wrapper for termux-setup-package-manager
+$envSetup
+exec "${tspmReal.absolutePath}" "$@"
+""".trimIndent())
+            wrapper.setExecutable(true, true)
+            wrapper.setReadable(true, true)
+        }
     }
 
     /**
