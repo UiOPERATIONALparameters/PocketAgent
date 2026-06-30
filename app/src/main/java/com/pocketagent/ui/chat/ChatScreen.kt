@@ -80,7 +80,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pocketagent.design.PocketType
 import com.pocketagent.design.extendedColors
 import com.pocketagent.design.softShadow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.snapshotFlow
 
 @Composable
 fun ChatScreen(
@@ -93,16 +96,30 @@ fun ChatScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     var userScrolledUp by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
-    // Track if user scrolled up — stop auto-scroll if so
-    // M19 FIX: was 'lastVisible < totalItems - 2' (too aggressive — reading second-to-last
-    // message counted as 'scrolled up'). Now 'lastVisible < totalItems - 1' (only triggers
-    // when user is 2+ messages from the bottom).
-    LaunchedEffect(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) {
-        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-        val totalItems = listState.layoutInfo.totalItemsCount
-        userScrolledUp = totalItems > 0 && lastVisible < totalItems - 1
+    // v3.7 FIX: Auto-scroll logic completely rewritten.
+    // Old code fired on every layout change (including auto-scroll itself), creating
+    // a feedback loop where the user couldn't scroll up because auto-scroll kept
+    // fighting them. New logic: only mark userScrolledUp when the USER is actively
+    // dragging (isScrollInProgress = true), not when auto-scroll moves the list.
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }
+            .distinctUntilChanged()
+            .filter { it }  // only when scroll STARTS
+            .collect {
+                // User is actively scrolling — check if they're NOT at the bottom
+                val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                val totalItems = listState.layoutInfo.totalItemsCount
+                if (totalItems > 0 && lastVisible < totalItems - 2) {
+                    userScrolledUp = true
+                } else if (totalItems > 0 && lastVisible >= totalItems - 1) {
+                    // User scrolled back to bottom — resume auto-scroll
+                    userScrolledUp = false
+                }
+            }
     }
+
     val context = LocalContext.current
 
     // Image picker for vision attachments

@@ -158,12 +158,14 @@ class NativeEnvironmentManager @Inject constructor(
             onProgress("Configuring...", -1, -1)
             patchTermuxPaths()
             patchShebangs()
-            patchAllScripts()  // v3.6: patch ALL scripts in bin/ (including extensionless ones like pkg)
+            patchAllScripts()
+            removeBrokenInitScripts()  // v3.7: delete profile.d scripts that cause "Permission denied"
             createSoSymlinks()
             createShSymlink()
+            createHttpsAptMethod()  // v3.7: create https apt method symlink (missing from bootstrap)
             setupSslCerts()
             fixAptConfig()
-            createCommandWrappers()  // v3.6: replace pkg/apt/dpkg with environment-setting wrappers
+            createCommandWrappers()
             createShellConfigs()
 
             // Create marker
@@ -538,6 +540,75 @@ class NativeEnvironmentManager @Inject constructor(
             --admindir=${usrDir.absolutePath}/var/lib/dpkg
             --root=${usrDir.absolutePath}
         """.trimIndent())
+    }
+
+    /**
+     * v3.7: Remove profile.d scripts that cause "Permission denied" errors.
+     * These scripts try to access /data/data/com.termux/ paths that don't exist
+     * in our app, causing noise on every shell startup.
+     */
+    private fun removeBrokenInitScripts() {
+        val profileDir = File(usrDir, "etc/profile.d")
+        if (!profileDir.exists()) return
+
+        // Scripts to delete entirely — they're Termux-specific and serve no purpose for us
+        val scriptsToDelete = listOf(
+            "01-termux-bootstrap-second-stage-fallback.sh",  // tries to run second-stage bootstrap
+            "init-termux-properties.sh",  // tries to copy termux.properties from Termux paths
+            "termux-proot.sh"  // tries to set up proot (we don't use it)
+        )
+
+        for (scriptName in scriptsToDelete) {
+            val script = File(profileDir, scriptName)
+            if (script.exists()) {
+                script.delete()
+            }
+        }
+
+        // Also remove any remaining profile.d scripts that still reference com.termux
+        profileDir.listFiles { f -> f.name.endsWith(".sh") }?.forEach { script ->
+            try {
+                val bytes = script.readBytes()
+                val content = String(bytes, Charsets.UTF_8)
+                if (content.contains("/data/data/com.termux/")) {
+                    // Patch it instead of deleting (might be useful)
+                    val patched = content
+                        .replace("/data/data/com.termux/files/usr", usrDir.absolutePath)
+                        .replace("/data/data/com.termux/files/home", workspace.homeDir.absolutePath)
+                        .replace("/data/data/com.termux/files", context.filesDir.absolutePath)
+                    script.writeBytes(patched.toByteArray(Charsets.UTF_8))
+                    script.setExecutable(true, true)
+                    script.setReadable(true, true)
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * v3.7: Create the https apt method — it's missing from the bootstrap.
+     * The http method supports HTTPS via libcurl, so we just symlink http → https.
+     * Without this, 'apt update' fails because our sources.list uses https://
+     */
+    private fun createHttpsAptMethod() {
+        val methodsDir = File(libDir, "apt/methods")
+        if (!methodsDir.exists()) return
+
+        val httpMethod = File(methodsDir, "http")
+        val httpsMethod = File(methodsDir, "https")
+
+        if (httpMethod.exists() && !httpsMethod.exists()) {
+            try {
+                // Create symlink: https → http
+                java.nio.file.Files.createSymbolicLink(httpsMethod.toPath(), httpMethod.toPath())
+            } catch (_: Exception) {
+                // Fallback: copy http to https
+                try {
+                    httpMethod.copyTo(httpsMethod, overwrite = true)
+                    httpsMethod.setExecutable(true, true)
+                    httpsMethod.setReadable(true, true)
+                } catch (_: Exception) {}
+            }
+        }
     }
 
     /**
