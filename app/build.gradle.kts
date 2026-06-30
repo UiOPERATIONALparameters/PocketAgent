@@ -23,8 +23,8 @@ android {
         //   - POST_NOTIFICATIONS permission requested at runtime
         //   - FOREGROUND_SERVICE_DATA_SYNC permission declared
         targetSdk = 28
-        versionCode = 31
-        versionName = "3.1.0"
+        versionCode = 32
+        versionName = "3.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

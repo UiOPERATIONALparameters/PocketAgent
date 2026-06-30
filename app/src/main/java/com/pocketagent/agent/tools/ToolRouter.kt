@@ -20,7 +20,10 @@ class ToolRouter @Inject constructor(
     private val globTool: GlobTool,
     private val installApkTool: InstallApkTool,
     private val loadSkillTool: LoadSkillTool,
-    private val webReaderTool: WebReaderTool
+    private val webReaderTool: WebReaderTool,
+    private val todoTool: TodoTool,
+    private val serveHttpTool: ServeHttpTool,
+    private val spawnSubagentTool: SpawnSubagentTool
 ) {
     private val tools: Map<String, AgentTool> = mapOf(
         bashTool.name to bashTool,
@@ -34,7 +37,10 @@ class ToolRouter @Inject constructor(
         globTool.name to globTool,
         installApkTool.name to installApkTool,
         loadSkillTool.name to loadSkillTool,
-        webReaderTool.name to webReaderTool
+        webReaderTool.name to webReaderTool,
+        todoTool.name to todoTool,
+        serveHttpTool.name to serveHttpTool,
+        spawnSubagentTool.name to spawnSubagentTool
     )
 
     fun specs(): List<ToolSpec> = listOf(
@@ -49,7 +55,10 @@ class ToolRouter @Inject constructor(
         webSearchTool.toSpec(),
         webReaderTool.toSpec(),
         loadSkillTool.toSpec(),
-        installApkTool.toSpec()
+        installApkTool.toSpec(),
+        todoTool.toSpec(),
+        serveHttpTool.toSpec(),
+        spawnSubagentTool.toSpec()
     )
 
     suspend fun execute(toolName: String, arguments: JsonElement): ToolResult {

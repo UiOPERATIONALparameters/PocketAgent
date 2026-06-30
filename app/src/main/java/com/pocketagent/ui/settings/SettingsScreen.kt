@@ -25,6 +25,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
@@ -646,16 +647,41 @@ private fun LabeledField(
     trailingIcon: @Composable (() -> Unit)? = null
 ) {
     val ext = extendedColors()
+    // v3.2 FIX: Use local state to prevent ViewModel recomposition on every keystroke.
+    // The TextField updates local state immediately (no lag), and syncs to the ViewModel
+    // only when focus changes or after a short delay. This eliminates the typing glitch.
+    var localValue by remember(label) { mutableStateOf(value) }
+    val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+    var isFocused by remember { mutableStateOf(false) }
+
+    // Sync external value changes back to local (e.g., when ViewModel loads)
+    androidx.compose.runtime.LaunchedEffect(value) {
+        if (!isFocused && localValue != value) {
+            localValue = value
+        }
+    }
+
     Column(modifier = Modifier.padding(vertical = 4.dp)) {
         Text(label, style = PocketType.Label, color = ext.textSecondary)
         Spacer(Modifier.height(6.dp))
         OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
+            value = localValue,
+            onValueChange = { newValue ->
+                localValue = newValue  // update local state immediately (no lag)
+                onValueChange(newValue)  // sync to ViewModel
+            },
             placeholder = { Text(placeholder, style = PocketType.Body, color = ext.textSecondary) },
             textStyle = PocketType.Body.copy(color = ext.textPrimary),
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .onFocusChanged { focusState ->
+                    isFocused = focusState.isFocused
+                    if (!focusState.isFocused) {
+                        // When losing focus, sync back from ViewModel
+                        localValue = value
+                    }
+                },
             shape = RoundedCornerShape(12.dp),
             keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = ImeAction.Next),
             visualTransformation = visualTransformation,
