@@ -13,7 +13,6 @@ import androidx.compose.ui.graphics.Color
  * PocketAgent color scheme.
  *
  * Designed by extracting actual computed CSS values from Kimi's live DOM.
- * See /home/z/my-project/research/KIMI_UI_RESEARCH.md for provenance.
  */
 
 // Extended color palette exposed via CompositionLocal for components that need more than Material's defaults

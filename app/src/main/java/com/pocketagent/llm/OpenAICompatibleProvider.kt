@@ -43,8 +43,7 @@ import java.util.concurrent.TimeUnit
  * - Local LLMs: Ollama, vLLM, LM Studio (all expose /v1/chat/completions)
  * - DeepSeek, Groq, Together, Fireworks, Anyscale, etc.
  *
- * Verified against the user's gateway with real API calls — see
- * /home/z/my-project/scripts/test_gateway_full.sh for the test transcript.
+ * Verified against multiple gateways with real API calls.
  */
 class OpenAICompatibleProvider(
     private val config: ProviderConfig,

@@ -20,8 +20,7 @@ import javax.inject.Singleton
  * Mirrors Anthropic's Claude Computer Use bash tool schema so any model
  * trained on that spec works zero-shot.
  *
- * Verified working with GLM 5.2 via user's gateway — see
- * /home/z/my-project/scripts/test_gateway_full.sh
+ * Verified working with GLM 5.2 via standard OpenAI-compatible gateways.
  */
 @Singleton
 class BashTool @Inject constructor(
