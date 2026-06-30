@@ -20,7 +20,9 @@ class GrepTool @Inject constructor(
     override val name = "grep"
     override val description = """
         Search file contents with regex. Returns matching lines with file:line:content.
-        Supports glob filtering. Caps at 50 results.
+        Supports glob filtering via the 'glob' param. Caps at 50 results.
+        Streams large files (no OOM risk). Searches dotfiles (e.g. .github/, .env) by default;
+        only skips the .git/ VCS directory.
     """.trimIndent()
 
     override val parametersSchema = """
@@ -32,7 +34,8 @@ class GrepTool @Inject constructor(
         val pattern = obj["pattern"]?.jsonPrimitive?.contentOrNull ?: return ToolResult.Error("Missing 'pattern'")
         val pathStr = obj["path"]?.jsonPrimitive?.contentOrNull ?: "."
         val glob = obj["glob"]?.jsonPrimitive?.contentOrNull ?: "*"
-        val caseInsensitive = obj["case_insensitive"]?.jsonPrimitive?.contentOrNull == "true"
+        // H14 FIX: case-insensitive boolean parsing — explicit intent
+        val caseInsensitive = obj["case_insensitive"]?.jsonPrimitive?.contentOrNull?.equals("true", ignoreCase = true) == true
 
         val searchDir = try { workspace.resolve(pathStr) } catch (e: SecurityException) { return ToolResult.Error(e.message ?: "Invalid path") }
         if (!searchDir.exists()) return ToolResult.Error("Path not found: $pathStr")
@@ -46,24 +49,28 @@ class GrepTool @Inject constructor(
 
         val filesToSearch = if (searchDir.isDirectory) {
             searchDir.walkTopDown()
-                .filter { it.isFile && !it.name.startsWith(".") && !it.path.contains("/.git/") }
+                // H13 FIX: only skip .git/ (the actual VCS dir), not all dotfiles.
+                // Was: !it.name.startsWith(".") — couldn't grep .github/.env
+                .filter { it.isFile && !it.path.contains("/.git/") && !it.path.endsWith("/.git") }
                 .filter { f -> if (glob == "*") true else { val gp = glob.replace(".", "\\.").replace("*", ".*"); Regex(gp).matches(f.name) } }
                 .toList()
         } else listOf(searchDir)
 
         for (file in filesToSearch) {
             if (results.size >= maxResults) break
+            // H12 FIX: stream large files via lineSequence() instead of readLines() (was OOMing on 100MB+ files)
             try {
-                val lines = file.readLines()
-                for ((idx, line) in lines.withIndex()) {
-                    if (results.size >= maxResults) break
-                    if (regex.containsMatchIn(line)) {
-                        val relPath = workspace.homeDir.toPath().relativize(file.toPath()).toString()
-                        results.add(buildJsonObject {
-                            put("file", relPath)
-                            put("line", JsonPrimitive(idx + 1))
-                            put("content", line.trim())
-                        })
+                file.bufferedReader().use { reader ->
+                    reader.lineSequence().forEachIndexed { idx, line ->
+                        if (results.size >= maxResults) return@use
+                        if (regex.containsMatchIn(line)) {
+                            val relPath = workspace.homeDir.toPath().relativize(file.toPath()).toString()
+                            results.add(buildJsonObject {
+                                put("file", relPath)
+                                put("line", JsonPrimitive(idx + 1))
+                                put("content", line.trim())
+                            })
+                        }
                     }
                 }
             } catch (_: Exception) {}

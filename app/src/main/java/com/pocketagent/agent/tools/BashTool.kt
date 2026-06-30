@@ -101,7 +101,10 @@ class BashTool @Inject constructor(
         return if (result.isSuccess) {
             ToolResult.Success(output, display)
         } else {
-            // Even on failure, return Success with the output — the LLM needs to see the error to recover
+            // C3 FIX: Even on failure, return Success with the output (the LLM needs to see
+            // the error in stderr to recover). But we differentiate the DISPLAY — the UI
+            // shows a red 'failed' chip when exit_code != 0. The JSON output's exit_code
+            // field is the source of truth for the LLM.
             ToolResult.Success(output, display)
         }
     }

@@ -17,7 +17,8 @@ class ToolRouter @Inject constructor(
     private val webSearchTool: WebSearchTool,
     private val strReplaceTool: StrReplaceTool,
     private val grepTool: GrepTool,
-    private val globTool: GlobTool
+    private val globTool: GlobTool,
+    private val installApkTool: InstallApkTool
 ) {
     private val tools: Map<String, AgentTool> = mapOf(
         bashTool.name to bashTool,
@@ -28,7 +29,8 @@ class ToolRouter @Inject constructor(
         webSearchTool.name to webSearchTool,
         strReplaceTool.name to strReplaceTool,
         grepTool.name to grepTool,
-        globTool.name to globTool
+        globTool.name to globTool,
+        installApkTool.name to installApkTool
     )
 
     fun specs(): List<ToolSpec> = listOf(
@@ -40,7 +42,8 @@ class ToolRouter @Inject constructor(
         grepTool.toSpec(),
         globTool.toSpec(),
         webFetchTool.toSpec(),
-        webSearchTool.toSpec()
+        webSearchTool.toSpec(),
+        installApkTool.toSpec()
     )
 
     suspend fun execute(toolName: String, arguments: JsonElement): ToolResult {
