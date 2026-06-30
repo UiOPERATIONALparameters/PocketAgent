@@ -447,9 +447,16 @@ fun SettingsScreen(
                     }
                 }
 
-                // Linux Environment section
+                // Linux Environment section (v2.1 — Ubuntu via proot)
                 Section(title = "Linux Environment") {
-                    if (state.bootstrapInstalled) {
+                    // Show ABI and distro info
+                    Text(
+                        "Architecture: ${state.linuxAbi} • Distro: ${state.linuxDistro}",
+                        style = PocketType.BodySmall,
+                        color = ext.textSecondary,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    if (state.linuxInstalled) {
                         // Installed state
                         Surface(
                             color = ext.success.copy(alpha = 0.1f),
@@ -458,12 +465,12 @@ fun SettingsScreen(
                         ) {
                             Column(modifier = Modifier.padding(12.dp)) {
                                 Text(
-                                    "Full Linux installed",
+                                    "Linux installed ✓",
                                     style = PocketType.BodyMedium,
                                     color = ext.success
                                 )
                                 Text(
-                                    "The AI now has: bash, python3, node, git, curl, wget, apt/pkg, and more.",
+                                    "The AI has full Ubuntu access: bash, apt, python3, perl. Can install node, git, gcc, ffmpeg, anything via 'apt install'.",
                                     style = PocketType.BodySmall,
                                     color = ext.textSecondary,
                                     modifier = Modifier.padding(top = 4.dp)
@@ -471,27 +478,9 @@ fun SettingsScreen(
                             }
                         }
                         Spacer(Modifier.height(8.dp))
-                        // Verify & Repair button
                         Surface(
                             onClick = {
-                                viewModel.verifyAndRepairBootstrap()
-                                Toast.makeText(context, "Verifying…", Toast.LENGTH_SHORT).show()
-                            },
-                            color = ext.accent.copy(alpha = 0.08f),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                "Verify & Repair",
-                                style = PocketType.BodyMedium,
-                                color = ext.accent,
-                                modifier = Modifier.padding(14.dp)
-                            )
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        Surface(
-                            onClick = {
-                                viewModel.uninstallBootstrap()
+                                viewModel.uninstallLinux()
                                 Toast.makeText(context, "Linux environment removed", Toast.LENGTH_SHORT).show()
                             },
                             color = ext.error.copy(alpha = 0.08f),
@@ -505,7 +494,7 @@ fun SettingsScreen(
                                 modifier = Modifier.padding(14.dp)
                             )
                         }
-                    } else if (state.bootstrapInstalling) {
+                    } else if (state.linuxInstalling) {
                         // Installing state
                         Surface(
                             color = ext.accent.copy(alpha = 0.1f),
@@ -514,14 +503,13 @@ fun SettingsScreen(
                         ) {
                             Column(modifier = Modifier.padding(12.dp)) {
                                 Text(
-                                    state.bootstrapStatus,
+                                    state.linuxStatus,
                                     style = PocketType.BodyMedium,
                                     color = ext.accent
                                 )
                                 Spacer(Modifier.height(8.dp))
-                                // Progress bar
                                 androidx.compose.material3.LinearProgressIndicator(
-                                    progress = { state.bootstrapProgress },
+                                    progress = { if (state.linuxProgress >= 0) state.linuxProgress else 0f },
                                     color = ext.accent,
                                     modifier = Modifier.fillMaxWidth()
                                 )
@@ -541,7 +529,7 @@ fun SettingsScreen(
                                     color = ext.textPrimary
                                 )
                                 Text(
-                                    "Downloads ~50MB one-time. Gives the AI: python3, node, git, curl, wget, apt install, and hundreds of Linux packages.",
+                                    "Downloads ~28MB one-time. Gives the AI a real Ubuntu 22.04 environment via proot: bash, apt, python3, + can install node, git, gcc, ffmpeg, ImageMagick, anything via 'apt install'.",
                                     style = PocketType.BodySmall,
                                     color = ext.textSecondary,
                                     modifier = Modifier.padding(top = 4.dp)
@@ -550,7 +538,7 @@ fun SettingsScreen(
                         }
                         Spacer(Modifier.height(8.dp))
                         Surface(
-                            onClick = { viewModel.installBootstrap() },
+                            onClick = { viewModel.installLinux() },
                             color = ext.accent,
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()
@@ -563,10 +551,10 @@ fun SettingsScreen(
                                 Text("Install Linux", style = PocketType.BodyMedium, color = ext.textOnAccent)
                             }
                         }
-                        if (state.bootstrapStatus.isNotEmpty()) {
+                        if (state.linuxStatus.isNotEmpty()) {
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                state.bootstrapStatus,
+                                state.linuxStatus,
                                 style = PocketType.BodySmall,
                                 color = ext.error
                             )

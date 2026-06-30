@@ -3,7 +3,7 @@ package com.pocketagent.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.pocketagent.llm.ModelInfo
-import com.pocketagent.sandbox.BootstrapInstaller
+import com.pocketagent.sandbox.LinuxEnvironmentManager
 import com.pocketagent.storage.ActiveProviderHolder
 import com.pocketagent.storage.prefs.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -29,20 +29,22 @@ data class SettingsUiState(
     val systemPrompt: String = "",
     val bashTimeoutSec: Int = 30,
     val workspaceQuotaMb: Int = 2048,
-    val maxToolIterations: Int = 30,
+    val maxToolIterations: Int = 50,
     val tokenSaveMode: Boolean = false,
-    // Bootstrap (Termux) state
-    val bootstrapInstalled: Boolean = false,
-    val bootstrapInstalling: Boolean = false,
-    val bootstrapProgress: Float = 0f,
-    val bootstrapStatus: String = ""
+    // Linux environment state (v2.1 — replaces bootstrap)
+    val linuxInstalled: Boolean = false,
+    val linuxInstalling: Boolean = false,
+    val linuxProgress: Float = 0f,
+    val linuxStatus: String = "",
+    val linuxAbi: String = "",
+    val linuxDistro: String = ""
 )
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val providerHolder: ActiveProviderHolder,
-    private val bootstrapInstaller: BootstrapInstaller
+    private val linuxEnv: LinuxEnvironmentManager
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsUiState())
@@ -53,6 +55,8 @@ class SettingsViewModel @Inject constructor(
             settingsRepository.load()
             val provider = settingsRepository.getActiveProvider()
             val s = settingsRepository.settings.value
+            val abi = LinuxEnvironmentManager.detectAbi()
+            val distro = if (LinuxEnvironmentManager.isUbuntu(abi)) "Ubuntu 22.04 LTS" else "Alpine 3.20"
             if (provider != null) {
                 _state.update {
                     it.copy(
@@ -66,7 +70,9 @@ class SettingsViewModel @Inject constructor(
                         workspaceQuotaMb = s.workspaceQuotaMb,
                         maxToolIterations = s.maxToolIterations,
                         tokenSaveMode = s.tokenSaveMode,
-                        bootstrapInstalled = bootstrapInstaller.isInstalled()
+                        linuxInstalled = linuxEnv.isInstalled(),
+                        linuxAbi = abi,
+                        linuxDistro = distro
                     )
                 }
                 refreshModels()
@@ -78,7 +84,9 @@ class SettingsViewModel @Inject constructor(
                         workspaceQuotaMb = s.workspaceQuotaMb,
                         maxToolIterations = s.maxToolIterations,
                         tokenSaveMode = s.tokenSaveMode,
-                        bootstrapInstalled = bootstrapInstaller.isInstalled()
+                        linuxInstalled = linuxEnv.isInstalled(),
+                        linuxAbi = abi,
+                        linuxDistro = distro
                     )
                 }
             }
@@ -190,92 +198,86 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * Download and install the Termux bootstrap (~50MB).
-     * Gives the AI full Linux: apt install, python, node, git, ffmpeg, etc.
+     * v2.1: Install the Linux environment (Ubuntu 22.04 via proot).
+     *
+     * This replaces the old Termux bootstrap approach. The new approach:
+     *   1. Extracts a static proot binary from APK assets (~1MB, instant)
+     *   2. Downloads Ubuntu 22.04 base rootfs (~28MB)
+     *   3. Extracts it (~150MB on disk)
+     *   4. Configures DNS, /tmp, /root
+     *
+     * Once installed, the agent has: bash, apt, python3, perl, AND can install
+     * node, git, gcc, ffmpeg, ImageMagick, anything via `apt install`.
      */
-    fun installBootstrap() {
-        if (_state.value.bootstrapInstalling) return
+    fun installLinux() {
+        if (_state.value.linuxInstalling) return
+
+        // Check storage first (need ~300MB free)
+        if (!linuxEnv.hasEnoughStorage(300)) {
+            _state.update {
+                it.copy(linuxStatus = "Not enough free storage. Need at least 300MB free.")
+            }
+            return
+        }
+
         _state.update {
             it.copy(
-                bootstrapInstalling = true,
-                bootstrapProgress = 0f,
-                bootstrapStatus = "Downloading Linux environment (50MB)…"
+                linuxInstalling = true,
+                linuxProgress = 0f,
+                linuxStatus = "Starting installation…"
             )
         }
         viewModelScope.launch {
-            val result = bootstrapInstaller.install { downloaded, total ->
+            val result = linuxEnv.installRootfs { status, downloaded, total ->
                 if (total > 0) {
                     val pct = downloaded.toFloat() / total
                     _state.update {
                         it.copy(
-                            bootstrapProgress = pct,
-                            bootstrapStatus = "Downloading… ${(pct * 100).toInt()}%"
+                            linuxProgress = pct,
+                            linuxStatus = "$status ${(pct * 100).toInt()}%"
                         )
                     }
                 } else if (downloaded > 0) {
                     _state.update {
                         it.copy(
-                            bootstrapStatus = "Extracting… ${(downloaded / 1024 / 1024)}MB"
+                            linuxProgress = -1f,  // indeterminate
+                            linuxStatus = "$status ${(downloaded / 1024 / 1024)}MB"
                         )
+                    }
+                } else {
+                    _state.update {
+                        it.copy(linuxStatus = status)
                     }
                 }
             }
             if (result.isSuccess) {
                 _state.update {
                     it.copy(
-                        bootstrapInstalling = false,
-                        bootstrapInstalled = true,
-                        bootstrapProgress = 1f,
-                        bootstrapStatus = "Linux environment installed! The AI now has full Linux access."
+                        linuxInstalling = false,
+                        linuxInstalled = true,
+                        linuxProgress = 1f,
+                        linuxStatus = "Linux installed! The AI now has full Ubuntu access (apt, python3, + can install anything)."
                     )
                 }
             } else {
                 _state.update {
                     it.copy(
-                        bootstrapInstalling = false,
-                        bootstrapStatus = "Failed: ${result.exceptionOrNull()?.message ?: "unknown error"}"
+                        linuxInstalling = false,
+                        linuxStatus = "Failed: ${result.exceptionOrNull()?.message ?: "unknown error"}"
                     )
                 }
             }
         }
     }
 
-    fun uninstallBootstrap() {
+    fun uninstallLinux() {
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { bootstrapInstaller.uninstall() }
+            withContext(Dispatchers.IO) { linuxEnv.uninstall() }
             _state.update {
                 it.copy(
-                    bootstrapInstalled = false,
-                    bootstrapStatus = "Linux environment removed."
+                    linuxInstalled = false,
+                    linuxStatus = "Linux environment removed."
                 )
-            }
-        }
-    }
-
-    /**
-     * Verify the bootstrap installation and repair if needed.
-     */
-    fun verifyAndRepairBootstrap() {
-        viewModelScope.launch {
-            val error = withContext(Dispatchers.IO) {
-                // First try to repair permissions
-                bootstrapInstaller.repairPermissions()
-                // Then verify
-                bootstrapInstaller.verify()
-            }
-            if (error == null) {
-                _state.update {
-                    it.copy(
-                        bootstrapInstalled = true,
-                        bootstrapStatus = "Linux environment verified OK."
-                    )
-                }
-            } else {
-                _state.update {
-                    it.copy(
-                        bootstrapStatus = "Verification failed: $error\nTry removing and reinstalling."
-                    )
-                }
             }
         }
     }
@@ -291,7 +293,9 @@ class SettingsViewModel @Inject constructor(
                     systemPrompt = it.systemPrompt,
                     bashTimeoutSec = it.bashTimeoutSec,
                     workspaceQuotaMb = it.workspaceQuotaMb,
-                    bootstrapInstalled = it.bootstrapInstalled
+                    linuxInstalled = it.linuxInstalled,
+                    linuxAbi = it.linuxAbi,
+                    linuxDistro = it.linuxDistro
                 )
             }
         }

@@ -47,7 +47,8 @@ import javax.inject.Singleton
 @Singleton
 class AgentLoop @Inject constructor(
     private val toolRouter: ToolRouter,
-    private val workspace: Workspace
+    private val workspace: Workspace,
+    private val linuxEnv: com.pocketagent.sandbox.LinuxEnvironmentManager
 ) {
     data class Event(
         val type: Type,
@@ -284,15 +285,18 @@ class AgentLoop @Inject constructor(
      *  - The user's custom prompt (if set) or the default
      *  - A list of available tools with one-line descriptions (no more hardcoded "9 tools")
      *  - Current workspace state: pwd, top-level files, git status (ZCode pattern)
+     *  - HONEST capability description: what's actually available (Tier 1 vs Tier 2)
      */
     private suspend fun buildSystemPrompt(userPrompt: String, tokenSaveMode: Boolean): String {
         val sb = StringBuilder()
 
-        // Base prompt
+        // Base prompt — HONEST about what's available
+        val linuxInstalled = linuxEnv.isInstalled()
+        val effectiveDefault = if (linuxInstalled) DEFAULT_SYSTEM_PROMPT_LINUX else DEFAULT_SYSTEM_PROMPT_LITE
         sb.append(if (userPrompt.isNotBlank() && userPrompt != DEFAULT_SYSTEM_PROMPT) {
             userPrompt
         } else {
-            DEFAULT_SYSTEM_PROMPT
+            effectiveDefault
         })
         sb.append("\n\n")
 
@@ -352,17 +356,15 @@ class AgentLoop @Inject constructor(
             }
 
             // Bootstrap status
-            val bootstrapInstalled = File(home.parentFile, "usr/.bootstrap_installed").exists()
-            sb.append("Linux environment: ${if (bootstrapInstalled) "installed (bash, python3, node, git, curl)" else "not installed (Settings → Install Linux Environment)"}\n")
-
-            // proot-distro status
-            val prootDir = File(home.parentFile, "proot-distro")
-            if (prootDir.exists()) {
-                val distros = prootDir.listFiles { f -> f.isDirectory && File(f, "bin/sh").exists() }
-                    ?.map { it.name } ?: emptyList()
-                if (distros.isNotEmpty()) {
-                    sb.append("Linux distros available: ${distros.joinToString(", ")}\n")
-                }
+            val linuxInstalled = linuxEnv.isInstalled()
+            if (linuxInstalled) {
+                val abi = com.pocketagent.sandbox.LinuxEnvironmentManager.detectAbi()
+                val distro = if (com.pocketagent.sandbox.LinuxEnvironmentManager.isUbuntu(abi)) "Ubuntu 22.04" else "Alpine 3.20"
+                sb.append("Linux environment: INSTALLED ($distro via proot)\n")
+                sb.append("Available: bash, apt, python3, perl. Install more: 'apt install nodejs git gcc ffmpeg imagemagick'\n")
+            } else {
+                sb.append("Linux environment: NOT installed (system shell only — basic coreutils)\n")
+                sb.append("To get python3/node/git/gcc, the user must install Linux from Settings → Linux Environment.\n")
             }
 
             sb.toString()
@@ -384,18 +386,27 @@ class AgentLoop @Inject constructor(
     )
 
     companion object {
-        const val DEFAULT_SYSTEM_PROMPT = """You are PocketAgent, an AI agent on the user's Android phone with a full Linux environment.
+        const val DEFAULT_SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT_LITE
+
+        /** System prompt when Linux (Ubuntu via proot) IS installed — full capabilities. */
+        const val DEFAULT_SYSTEM_PROMPT_LINUX = """You are PocketAgent, an AI agent on the user's Android phone with a FULL Ubuntu 22.04 Linux environment.
 
 ## Your Environment
-Private Linux workspace at ~/ with subdirectories: projects/, tmp/, downloads/
-If Linux is installed (Termux bootstrap), you have: bash, python3, node, git, curl, wget, apt/pkg, gcc, clang, and more.
-Install packages with: pkg install <name> or pip install <name>
-For full Debian/Ubuntu access (apt install ffmpeg, imagemagick, etc.), ask the user to install proot-distro from Settings.
+- Private workspace at ~/ (bind-mounted into Ubuntu at /root/workspace)
+- Full Ubuntu 22.04 via proot: bash, apt, python3, perl pre-installed
+- /tmp is writable (proot virtualizes it)
+- Install ANYTHING with apt: nodejs, git, gcc, ffmpeg, ImageMagick, LaTeX, build-essential, etc.
+  Example: apt install -y nodejs git gcc python3-pip ffmpeg
+- Your workspace ~/ is shared between the host and the container — files you create are accessible from the file browser
 
 ## Your Capabilities
 You have TOTAL FREEDOM. You can:
-- Build APKs (gradle), websites, scripts, documents, anything
-- Install the APKs you build (install_apk tool launches the system installer)
+- Build APKs (apt install openjdk-17-jdk; install gradle; ./gradlew assembleRelease)
+- Build websites (node, npm, any JS framework)
+- Run Python scripts (python3 pre-installed; pip install any package)
+- Compile C/C++ (apt install gcc g++)
+- Process media (apt install ffmpeg imagemagick)
+- Install the APKs you build (install_apk tool)
 - Run any shell command, write any file, fetch any URL
 - Search the web for current information
 
@@ -407,25 +418,62 @@ You have TOTAL FREEDOM. You can:
 5. Don't repeat failing commands — try a different approach immediately
 6. If a tool fails, read the error and fix it — don't retry blindly
 7. For long outputs, use `head -50` or `tail -50` to limit output
-8. Summarize results briefly after completing a task
+8. When installing apt packages, use -y flag (non-interactive)
+9. Summarize results briefly after completing a task
 
 ## Tool Selection Guide
 - Editing code? → str_replace (NOT file_write)
 - Finding code? → grep (NOT bash grep)
 - Finding files? → glob (NOT bash find)
 - Reading files? → file_read (NOT bash cat)
-- Running commands? → bash
+- Running commands? → bash (runs inside Ubuntu)
 - Downloading? → web_fetch (text) or bash curl (binary)
 - Searching web? → web_search
 - Built an APK? → install_apk to let the user install it
 
-## Troubleshooting
-- "Permission denied" → chmod +x <file>
-- "command not found" → pkg install <package>
-- "library not found" → check LD_LIBRARY_PATH, create symlinks
-- /tmp issues → use ${'$'}TMPDIR or ~/tmp instead (proot-distro containers have their own /tmp)
-
 You have TOTAL FREEDOM. Create, delete, install, build anything.
 The user sees every tool call. Be transparent but concise."""
+
+        /** System prompt when Linux is NOT installed — limited to system shell only. */
+        const val DEFAULT_SYSTEM_PROMPT_LITE = """You are PocketAgent, an AI agent on the user's Android phone.
+
+## Your Environment
+- Private workspace at ~/ with subdirectories: projects/, tmp/, downloads/
+- LIMITED shell: Android's /system/bin/sh (mksh) — basic coreutils only
+- Available: ls, cat, echo, grep, sed, awk, head, tail, wc, sort, uniq, tr, cut, mkdir, rm, cp, mv
+- NOT available (until Linux is installed): python3, node, git, gcc, pip, npm, apt
+- /tmp is NOT writable — use ~/tmp instead
+
+## How to Get Full Linux
+Tell the user: "Go to Settings → Linux Environment → Install Linux" to enable full Ubuntu access (python3, node, git, gcc, apt, anything).
+
+## Your Current Capabilities (Limited)
+You can still:
+- Write and edit files (file_write, str_replace)
+- Read files (file_read, file_list, grep, glob)
+- Fetch URLs (web_fetch, web_search)
+- Run basic shell commands (bash — but only coreutils)
+- Install APKs you build (install_apk)
+
+You CANNOT build APKs (no gradle/java), run Python, or compile C until Linux is installed.
+Be honest with the user about this limitation.
+
+## Efficiency Rules
+1. PREFER str_replace over file_write for editing existing files
+2. Use grep/glob to FIND things, not bash grep/find
+3. Make ONE tool call at a time, wait for result, then proceed
+4. Be CONCISE — don't explain what you're about to do, just do it
+5. If a tool fails, read the error and fix it
+
+## Tool Selection Guide
+- Editing code? → str_replace (NOT file_write)
+- Finding code? → grep (NOT bash grep)
+- Finding files? → glob (NOT bash find)
+- Reading files? → file_read (NOT bash cat)
+- Running commands? → bash (limited — coreutils only)
+- Downloading? → web_fetch
+- Searching web? → web_search
+
+Be transparent about limitations. Suggest the user install Linux for full capabilities."""
     }
 }
