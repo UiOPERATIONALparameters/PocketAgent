@@ -463,39 +463,56 @@ class BootstrapInstaller @Inject constructor(
         if (!dpkgAvailable.exists()) dpkgAvailable.writeText("")
     }
 
+    /**
+     * CRITICAL: Create sh symlink. Many scripts use #!/path/to/sh but
+     * only bash exists. Create sh -> bash symlink.
+     */
+    private fun createShSymlink() {
+        val bashFile = File(binDir, "bash")
+        val shFile = File(binDir, "sh")
+        if (bashFile.exists() && !shFile.exists()) {
+            try {
+                java.nio.file.Files.createSymbolicLink(shFile.toPath(), bashFile.toPath())
+                shFile.setExecutable(true, true)
+            } catch (_: Exception) {
+                try { shFile.copyFrom(bashFile) } catch (_: Exception) {}
+            }
+        }
+    }
+
     private fun createSoSymlinks(libDir: File) {
         if (!libDir.exists()) return
 
-        libDir.listFiles { f -> f.name.endsWith(".so") || f.name.contains(".so.") }?.forEach { file ->
-            val name = file.name
-            // Skip if it's already a symlink
-            if (java.nio.file.Files.isSymbolicLink(file.toPath())) return@forEach
+        val realFiles = libDir.listFiles { f ->
+            f.isFile && !java.nio.file.Files.isSymbolicLink(f.toPath()) &&
+            (f.name.endsWith(".so") || f.name.contains(".so."))
+        } ?: return
 
-            // Parse version from name: libfoo.so.8.0 -> libfoo.so.8, libfoo.so
+        realFiles.forEach { file ->
+            val name = file.name
             val soIdx = name.indexOf(".so")
             if (soIdx < 0) return@forEach
 
-            val baseName = name.substring(0, soIdx + 3)  // libfoo.so
-            val versionPart = name.substring(soIdx + 3)  // .8.0 or empty
+            val baseName = name.substring(0, soIdx + 3)
+            val versionPart = name.substring(soIdx + 3)
 
             if (versionPart.isNotEmpty()) {
-                // Create libfoo.so.8 symlink (first version number)
                 val parts = versionPart.split(".").filter { it.isNotEmpty() }
-                if (parts.isNotEmpty()) {
-                    val soname = "$baseName.${parts[0]}"  // libfoo.so.8
-                    val sonameFile = File(libDir, soname)
-                    if (!sonameFile.exists()) {
+                // Create ALL intermediate symlinks:
+                //   libfoo.so.1.0.8 -> libfoo.so.1.0 -> libfoo.so.1 -> libfoo.so
+                for (i in parts.indices) {
+                    val symlinkName = baseName + "." + parts.subList(0, i + 1).joinToString(".")
+                    val symlinkFile = File(libDir, symlinkName)
+                    if (symlinkFile.name != name && !symlinkFile.exists()) {
                         try {
-                            java.nio.file.Files.createSymbolicLink(sonameFile.toPath(), file.toPath())
+                            java.nio.file.Files.createSymbolicLink(symlinkFile.toPath(), file.toPath())
                         } catch (_: Exception) {
-                            // Fallback: copy if symlink fails (some filesystems don't support symlinks)
-                            try { sonameFile.copyFrom(file) } catch (_: Exception) {}
+                            try { symlinkFile.copyFrom(file) } catch (_: Exception) {}
                         }
                     }
                 }
             }
 
-            // Create libfoo.so symlink (development link) if it doesn't exist
             val devLink = File(libDir, baseName)
             if (!devLink.exists()) {
                 try {
