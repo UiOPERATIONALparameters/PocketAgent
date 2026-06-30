@@ -164,7 +164,7 @@ class WebReaderTool @Inject constructor(
 
         // Convert <p>, <br>, <div> to newlines
         text = text.replace(Regex("</(p|div|h[1-6]|li|tr|blockquote)>", RegexOption.IGNORE_CASE), "\n")
-        text = text.replace(Regex("<br\s*/?>", RegexOption.IGNORE_CASE), "\n")
+        text = text.replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
         text = text.replace(Regex("<li[^>]*>", RegexOption.IGNORE_CASE), "\n• ")
 
         // Remove all remaining tags
