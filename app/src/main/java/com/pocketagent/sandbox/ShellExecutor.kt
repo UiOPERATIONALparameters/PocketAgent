@@ -54,7 +54,7 @@ class ShellExecutor @Inject constructor(
     suspend fun execute(
         command: String,
         timeoutSec: Int = 30,
-        maxOutputBytes: Int = 256_000
+        maxOutputBytes: Int = 30_000
     ): Result = withContext(Dispatchers.IO) {
         val start = System.currentTimeMillis()
 

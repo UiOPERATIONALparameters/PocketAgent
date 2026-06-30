@@ -174,6 +174,21 @@ class FileBrowserViewModel @Inject constructor(
         navigateTo(if (parent.isEmpty() || parent == current) "." else parent)
     }
 
+    /**
+     * Download/share a file from the workspace to the user's phone.
+     * Uses Android's share sheet so the user can save to Downloads,
+     * send via email, etc.
+     */
+    fun downloadFile(relativePath: String): String? {
+        return try {
+            val file = workspace.resolve(relativePath)
+            if (!file.exists() || !file.isFile) return null
+            file.absolutePath
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun clearError() {
         _state.update { it.copy(error = null) }
     }

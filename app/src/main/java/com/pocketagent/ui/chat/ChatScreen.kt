@@ -89,6 +89,14 @@ fun ChatScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
+    var userScrolledUp by remember { mutableStateOf(false) }
+
+    // Track if user scrolled up — stop auto-scroll if so
+    LaunchedEffect(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) {
+        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+        val totalItems = listState.layoutInfo.totalItemsCount
+        userScrolledUp = totalItems > 0 && lastVisible < totalItems - 2
+    }
     val context = LocalContext.current
 
     // Image picker for vision attachments
@@ -121,11 +129,13 @@ fun ChatScreen(
         }
     }
 
-    // Auto-scroll to bottom on new messages
+    // Smart auto-scroll — only scroll if user hasn't scrolled up
     LaunchedEffect(state.messages.size, state.streamingContent, state.streamingToolCalls.size) {
-        val target = state.messages.size + (if (state.streamingContent.isNotEmpty() || state.streamingToolCalls.isNotEmpty()) 1 else 0) - 1
-        if (target >= 0) {
-            listState.animateScrollToItem(target.coerceAtLeast(0))
+        if (!userScrolledUp) {
+            val target = state.messages.size + (if (state.streamingContent.isNotEmpty() || state.streamingToolCalls.isNotEmpty()) 1 else 0) - 1
+            if (target >= 0) {
+                listState.animateScrollToItem(target.coerceAtLeast(0))
+            }
         }
     }
 
@@ -144,8 +154,8 @@ fun ChatScreen(
                 title = state.title,
                 onMenuClick = viewModel::toggleSidebar,
                 onNewChat = {
-                    viewModel.newConversation()
-                    onNewConversation()
+                    viewModel.requestNewChat()
+                    if (!state.isAgentRunning) onNewConversation()
                 },
                 onOpenSettings = onOpenSettings,
                 onOpenFiles = onOpenFiles
@@ -285,6 +295,35 @@ fun ChatScreen(
                     }
                 },
                 onClose = viewModel::closeSidebar
+            )
+        }
+
+        // New chat warning dialog
+        if (state.showNewChatWarning) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { viewModel.cancelNewChat() },
+                title = { Text("Agent is running", style = PocketType.Title, color = extendedColors().textPrimary) },
+                text = {
+                    Text(
+                        "The AI agent is still working. Starting a new chat will stop the current task. Continue?",
+                        style = PocketType.Body,
+                        color = extendedColors().textSecondary
+                    )
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(
+                        onClick = {
+                            viewModel.forceNewChat()
+                            onNewConversation()
+                        }
+                    ) { Text("New Chat", color = extendedColors().accent) }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(
+                        onClick = { viewModel.cancelNewChat() }
+                    ) { Text("Cancel", color = extendedColors().textSecondary) }
+                },
+                containerColor = extendedColors().surface
             )
         }
 

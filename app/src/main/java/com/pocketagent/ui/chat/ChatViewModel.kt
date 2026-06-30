@@ -52,6 +52,7 @@ data class ChatUiState(
     val activeToolName: String? = null,
     val error: String? = null,
     val sidebarOpen: Boolean = false,
+    val showNewChatWarning: Boolean = false,
     val pendingAttachments: List<Attachment> = emptyList()
 ) {
     data class VisibleToolCall(
@@ -558,9 +559,36 @@ class ChatViewModel @Inject constructor(
                 streamingToolCalls = emptyList(),
                 isAgentRunning = false,
                 activeToolName = null,
-                pendingAttachments = emptyList()
+                pendingAttachments = emptyList(),
+                showNewChatWarning = false
             )
         }
+    }
+
+    /**
+     * Request new chat — shows warning if agent is running.
+     */
+    fun requestNewChat() {
+        if (_state.value.isAgentRunning) {
+            _state.update { it.copy(showNewChatWarning = true) }
+        } else {
+            newConversation()
+        }
+    }
+
+    /**
+     * Force new chat even if agent is running.
+     */
+    fun forceNewChat() {
+        stopAgent()
+        newConversation()
+    }
+
+    /**
+     * Cancel new chat warning.
+     */
+    fun cancelNewChat() {
+        _state.update { it.copy(showNewChatWarning = false) }
     }
 
     /**

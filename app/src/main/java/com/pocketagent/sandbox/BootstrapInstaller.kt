@@ -181,6 +181,12 @@ class BootstrapInstaller @Inject constructor(
             // Create .profile and improve .bashrc
             createShellConfigs()
 
+            // CRITICAL: Create /tmp symlink so tools that hardcode /tmp work
+            createTmpSymlink()
+
+            // CRITICAL: Remove init-termux-properties.sh (causes permission errors)
+            removeBrokenInitScripts()
+
             // Create marker file
             File(usrDir, MARKER_FILE).writeText(System.currentTimeMillis().toString())
 
@@ -571,6 +577,66 @@ class BootstrapInstaller @Inject constructor(
     }
 
     /**
+     * CRITICAL: Create /tmp symlink.
+     * Many tools (pip, compilers, etc.) hardcode /tmp.
+     * We can't write to system /tmp, but we can create a symlink
+     * from /tmp to our workspace tmp directory.
+     * If symlink fails (permission), set TMPDIR env var (already done).
+     */
+    private fun createTmpSymlink() {
+        // Try to create /tmp -> ~/tmp symlink
+        // This may fail on some Android versions — that's OK, TMPDIR is set
+        val tmpLink = java.io.File("/tmp")
+        if (!tmpLink.exists()) {
+            try {
+                java.nio.file.Files.createSymbolicLink(
+                    tmpLink.toPath(),
+                    workspace.tmpDir.toPath()
+                )
+            } catch (_: Exception) {
+                // Can't create /tmp symlink — TMPDIR env var is the fallback
+            }
+        }
+    }
+
+    /**
+     * Remove scripts that try to write to /data/data/com.termux/ paths.
+     * These cause "Permission denied" errors on every login.
+     */
+    private fun removeBrokenInitScripts() {
+        val profileDir = java.io.File(usrDir, "etc/profile.d")
+        if (!profileDir.exists()) return
+
+        // Remove init-termux-properties.sh — it writes to /data/data/com.termux/
+        val brokenScripts = listOf(
+            "init-termux-properties.sh",
+            "termux-proot.sh"
+        )
+        for (scriptName in brokenScripts) {
+            val script = java.io.File(profileDir, scriptName)
+            if (script.exists()) {
+                script.delete()
+            }
+        }
+
+        // Also patch any remaining profile.d scripts that reference com.termux
+        profileDir.listFiles { f -> f.name.endsWith(".sh") }?.forEach { script ->
+            try {
+                val text = script.readText()
+                if (text.contains("/data/data/com.termux/")) {
+                    script.writeText(text.replace(
+                        "/data/data/com.termux/files/usr",
+                        usrDir.absolutePath
+                    ).replace(
+                        "/data/data/com.termux/files/home",
+                        workspace.homeDir.absolutePath
+                    ))
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+        /**
      * Create .profile, .bash_profile, and improve .bashrc.
      * This ensures login shells get configured properly.
      */
