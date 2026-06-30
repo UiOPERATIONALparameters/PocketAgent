@@ -114,13 +114,6 @@ fun ChatScreen(
 
     // Detect user scroll — but ONLY when user is actively dragging
     // (not when auto-scroll moves the list programmatically)
-    val scrollListener = remember {
-        object : androidx.compose.foundation.gestures.ScrollableState {
-            override val isScrollInProgress: Boolean get() = listState.isScrollInProgress
-            override fun dispatchRawDelta(delta: Float): Float = 0f
-        }
-    }
-
     androidx.compose.runtime.LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress }
             .distinctUntilChanged()
