@@ -403,13 +403,13 @@ class LinuxEnvironmentManager @Inject constructor(
                                 name = name,
                                 isDirectory = entry.isDirectory,
                                 isSymbolicLink = entry.isSymbolicLink,
-                                isHardLink = entry.isHardLink,
+                                isHardLink = entry.isLink,  // isLink = hard link in Apache Commons Compress
                                 linkName = entry.linkName,
                                 mode = entry.mode
                             ))
 
-                            // Copy the file content if it's a regular file
-                            if (!entry.isDirectory && !entry.isSymbolicLink && !entry.isHardLink) {
+                            // Copy the file content if it's a regular file (not dir, not symlink, not hardlink)
+                            if (!entry.isDirectory && !entry.isSymbolicLink && !entry.isLink) {
                                 val outFile = File(targetDir, name)
                                 outFile.parentFile?.mkdirs()
                                 FileOutputStream(outFile).use { tis.copyTo(it) }
