@@ -78,11 +78,33 @@ class ShellExecutor @Inject constructor(
         env["TMPDIR"] = workspace.tmpDir.absolutePath
 
         if (useNative) {
-            // v3.1 FIX: Set ALL environment variables needed for native execution
+            // v3.5 CRITICAL FIX: Set up LD_PRELOAD with libtermux-exec.so
+            // This is THE missing piece that makes apt/pkg work.
+            //
+            // The apt binary has COMPILED-IN hardcoded paths to /data/data/com.termux/files/usr/lib/apt/methods/
+            // These can't be overridden by apt.conf — they're baked into the ELF binary.
+            //
+            // termux-exec solves this by intercepting execve() calls via LD_PRELOAD.
+            // It rewrites any path starting with /data/data/com.termux/files/usr/ to our prefix.
+            // This is EXACTLY what Termux itself does.
+            //
+            // Required env vars for termux-exec:
+            //   TERMUX_PREFIX        = our usr dir
+            //   TERMUX_APP__DATA_DIR = our files dir (note double underscore)
+            //   TERMUX_ANDROID_HOME  = our home dir
+            val termuxExecLib = File(nativeEnv.libDir, "libtermux-exec-ld-preload.so")
+            if (termuxExecLib.exists()) {
+                env["LD_PRELOAD"] = termuxExecLib.absolutePath
+            }
+
+            // v3.5: Set ALL environment variables
             env["PATH"] = nativeEnv.getPath()
             env["LD_LIBRARY_PATH"] = nativeEnv.libDir.absolutePath
             env["PREFIX"] = nativeEnv.usrDir.absolutePath
             env["TERMUX_PREFIX"] = nativeEnv.usrDir.absolutePath
+            env["TERMUX_APP__DATA_DIR"] = context.filesDir.absolutePath  // note double underscore
+            env["TERMUX_ANDROID_HOME"] = workspace.homeDir.absolutePath
+            env["TERMUX_HOME"] = workspace.homeDir.absolutePath
             env["APT_CONFIG"] = "${nativeEnv.etcDir.absolutePath}/apt/apt.conf"
             env["DPKG_ADMINDIR"] = "${nativeEnv.usrDir.absolutePath}/var/lib/dpkg"
 

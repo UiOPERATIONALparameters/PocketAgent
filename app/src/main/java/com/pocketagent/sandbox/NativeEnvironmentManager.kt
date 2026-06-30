@@ -546,12 +546,18 @@ class NativeEnvironmentManager @Inject constructor(
      */
     private fun createPkgWrapper() {
         val pkgWrapper = File(binDir, "pkg-pocketagent")
+        val termuxExecLib = File(libDir, "libtermux-exec-ld-preload.so")
         pkgWrapper.writeText("""#!/data/data/com.pocketagent/files/usr/bin/bash
 # PocketAgent pkg wrapper — sets the right environment for apt/dpkg
+# v3.5: LD_PRELOAD with termux-exec is CRITICAL — it rewrites hardcoded paths
 export PREFIX="${usrDir.absolutePath}"
 export TERMUX_PREFIX="${usrDir.absolutePath}"
+export TERMUX_APP__DATA_DIR="${context.filesDir.absolutePath}"
+export TERMUX_ANDROID_HOME="${workspace.homeDir.absolutePath}"
+export TERMUX_HOME="${workspace.homeDir.absolutePath}"
 export PATH="${binDir.absolutePath}:/system/bin:/system/xbin:${'$'}PATH"
 export LD_LIBRARY_PATH="${libDir.absolutePath}"
+export LD_PRELOAD="${termuxExecLib.absolutePath}"
 export APT_CONFIG="${etcDir.absolutePath}/apt/apt.conf"
 export DPKG_ADMINDIR="${usrDir.absolutePath}/var/lib/dpkg"
 export TMPDIR="${workspace.tmpDir.absolutePath}"
@@ -564,19 +570,25 @@ exec "${usrDir.absolutePath}/bin/apt" "$@"
 
     /**
      * Create .profile and .bashrc with proper environment setup.
-     * v3.1 FIX: Include ALL environment variables needed for apt/dpkg/pkg to work.
+     * v3.5 CRITICAL: Include LD_PRELOAD with termux-exec + all TERMUX_* env vars.
      */
     private fun createShellConfigs() {
         val homeDir = workspace.homeDir
+        val termuxExecLib = File(libDir, "libtermux-exec-ld-preload.so")
 
         val profile = File(homeDir, ".profile")
         if (!profile.exists()) {
             profile.writeText("""
                 # PocketAgent .profile
+                # v3.5: termux-exec LD_PRELOAD rewrites hardcoded Termux paths
                 export PREFIX="${usrDir.absolutePath}"
                 export TERMUX_PREFIX="${usrDir.absolutePath}"
+                export TERMUX_APP__DATA_DIR="${context.filesDir.absolutePath}"
+                export TERMUX_ANDROID_HOME="${homeDir.absolutePath}"
+                export TERMUX_HOME="${homeDir.absolutePath}"
                 export PATH="${binDir.absolutePath}:/system/bin:/system/xbin:${'$'}PATH"
                 export LD_LIBRARY_PATH="${libDir.absolutePath}"
+                export LD_PRELOAD="${termuxExecLib.absolutePath}"
                 export LANG=en_US.UTF-8
                 export LC_ALL=en_US.UTF-8
                 export TERM=xterm-256color
@@ -595,11 +607,18 @@ exec "${usrDir.absolutePath}/bin/apt" "$@"
         val bashrc = File(homeDir, ".bashrc")
         bashrc.writeText("""
             # PocketAgent .bashrc
+            # v3.5: termux-exec LD_PRELOAD is THE key — it intercepts execve() and rewrites
+            # /data/data/com.termux/files/usr/ → our prefix. Without this, apt/pkg can't find
+            # their method binaries (compiled-in paths can't be overridden by config).
             export PS1='pocketagent ❯ '
             export PREFIX="${usrDir.absolutePath}"
             export TERMUX_PREFIX="${usrDir.absolutePath}"
+            export TERMUX_APP__DATA_DIR="${context.filesDir.absolutePath}"
+            export TERMUX_ANDROID_HOME="${homeDir.absolutePath}"
+            export TERMUX_HOME="${homeDir.absolutePath}"
             export PATH="${binDir.absolutePath}:/system/bin:/system/xbin:${'$'}PATH"
             export LD_LIBRARY_PATH="${libDir.absolutePath}"
+            export LD_PRELOAD="${termuxExecLib.absolutePath}"
             export LANG=en_US.UTF-8
             export LC_ALL=en_US.UTF-8
             export TERM=xterm-256color
@@ -614,19 +633,6 @@ exec "${usrDir.absolutePath}/bin/apt" "$@"
             export GIT_SSL_CAINFO="${etcDir.absolutePath}/ssl/certs/ca-certificates.crt"
             alias ll='ls -la'
             alias ..='cd ..'
-            # pkg wrapper that sets the right environment
-            pkg() {
-                PREFIX="${usrDir.absolutePath}" command pkg "${'$'}@"
-            }
-            apt() {
-                APT_CONFIG="${etcDir.absolutePath}/apt/apt.conf" command apt "${'$'}@"
-            }
-            apt-get() {
-                APT_CONFIG="${etcDir.absolutePath}/apt/apt.conf" command apt-get "${'$'}@"
-            }
-            dpkg() {
-                DPKG_ADMINDIR="${usrDir.absolutePath}/var/lib/dpkg" command dpkg "${'$'}@"
-            }
         """.trimIndent())
     }
 
