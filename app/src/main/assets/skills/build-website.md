@@ -1,10 +1,7 @@
 # Skill: Build a Website
 
 ## When to Use
-The user wants to build a website, web app, or web page. This includes:
-- Static websites (HTML/CSS/JS)
-- Dynamic web apps (Python Flask, Node Express)
-- Single-page apps (React, Vue, Svelte)
+The user wants to build a website, web app, or web page.
 
 ## Prerequisites
 - Linux environment installed (Settings → Linux Environment)
@@ -16,14 +13,15 @@ The user wants to build a website, web app, or web page. This includes:
 ```bash
 # For static sites: no dependencies needed
 # For Node.js apps:
-apk add nodejs npm
+pkg install nodejs
 
 # For Python web apps:
-apk add python3 py3-pip
+pkg install python
 pip install flask
 
 # For serving static files:
-apk add python3  # use: python3 -m http.server 8080
+pkg install python
+# use: python -m http.server 8080
 ```
 
 ### 2. Create the Project
@@ -40,7 +38,7 @@ cd ~/projects/website
 ### 4. Serve Locally (for testing)
 ```bash
 # Static files:
-cd ~/projects/website && python3 -m http.server 8080 &
+cd ~/projects/website && python -m http.server 8080 &
 
 # Flask:
 FLASK_APP=app.py flask run --host=0.0.0.0 --port=8080 &
@@ -51,12 +49,10 @@ node server.js &
 
 ### 5. Share with User
 The user can access the site at `http://localhost:8080` in their phone's browser.
-To make it accessible from other devices on the same network, use `--host=0.0.0.0`.
 
 ### 6. Export
 Copy the final files to `~/downloads/` so the user can download them via the Files browser.
 
 ## Tips
-- Use `--no-cache` with apk to save disk space
-- For production: minify CSS/JS, optimize images
+- Use `pkg install -y` for non-interactive installs
 - Keep the workspace organized: `~/projects/website/` for code, `~/downloads/` for output

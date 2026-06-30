@@ -451,7 +451,7 @@ fun SettingsScreen(
                 Section(title = "Linux Environment") {
                     // Show ABI and distro info
                     Text(
-                        "Architecture: ${state.linuxAbi} • Distro: ${state.linuxDistro}",
+                        "Architecture: ${state.linuxAbi} • Type: Termux Native (no proot)",
                         style = PocketType.BodySmall,
                         color = ext.textSecondary,
                         modifier = Modifier.padding(bottom = 8.dp)
@@ -470,7 +470,7 @@ fun SettingsScreen(
                                     color = ext.success
                                 )
                                 Text(
-                                    "The AI has full Linux access: bash, apt, python3, perl (Ubuntu 22.04). Can install node, git, gcc, ffmpeg, anything via 'apt install'.",
+                                    "The AI has full bash + apt + pkg access. Can install python3, node, git, gcc, ffmpeg, anything via 'pkg install'.",
                                     style = PocketType.BodySmall,
                                     color = ext.textSecondary,
                                     modifier = Modifier.padding(top = 4.dp)
@@ -529,7 +529,7 @@ fun SettingsScreen(
                                     color = ext.textPrimary
                                 )
                                 Text(
-                                    "Downloads ~28MB one-time. Gives the AI a real Ubuntu 22.04 environment via proot: bash, apt, python3, perl pre-installed + can install node, git, gcc, ffmpeg, ImageMagick, anything via 'apt install'.",
+                                    "Downloads ~40MB one-time. Gives the AI a native Linux environment (no proot, no root needed): bash, apt, pkg, curl + can install python3, node, git, gcc, ffmpeg, anything via 'pkg install'.",
                                     style = PocketType.BodySmall,
                                     color = ext.textSecondary,
                                     modifier = Modifier.padding(top = 4.dp)
