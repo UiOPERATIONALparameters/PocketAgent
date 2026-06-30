@@ -1,0 +1,36 @@
+# Binary files — never apply text normalization or line-ending conversion
+*.so binary
+*.deb binary
+*.zip binary
+*.gz binary
+*.tar binary
+*.apk binary
+*.jar binary
+*.dex binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+
+# Kotlin/Java/XML/Gradle are text
+*.kt text
+*.java text
+*.xml text
+*.gradle text
+*.gradle.kts text
+*.kts text
+*.properties text
+*.toml text
+*.md text
+*.yml text
+*.yaml text
+*.json text
+*.sh text
+*.py text

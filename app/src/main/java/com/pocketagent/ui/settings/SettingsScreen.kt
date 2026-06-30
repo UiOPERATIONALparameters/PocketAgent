@@ -647,16 +647,16 @@ private fun LabeledField(
     trailingIcon: @Composable (() -> Unit)? = null
 ) {
     val ext = extendedColors()
-    // v3.2 FIX: Use local state to prevent ViewModel recomposition on every keystroke.
-    // The TextField updates local state immediately (no lag), and syncs to the ViewModel
-    // only when focus changes or after a short delay. This eliminates the typing glitch.
+    // v3.3 REAL FIX: Don't push to ViewModel on every keystroke — that causes the entire
+    // Settings screen to recompose, creating visible lag/glitch.
+    // Instead: update local state immediately (no lag), push to ViewModel ONLY when focus is lost.
     var localValue by remember(label) { mutableStateOf(value) }
-    val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
     var isFocused by remember { mutableStateOf(false) }
 
-    // Sync external value changes back to local (e.g., when ViewModel loads)
+    // Sync external value changes to local (e.g., when ViewModel loads data initially)
+    // Only do this when NOT focused — otherwise we'd overwrite what the user is typing
     androidx.compose.runtime.LaunchedEffect(value) {
-        if (!isFocused && localValue != value) {
+        if (!isFocused) {
             localValue = value
         }
     }
@@ -667,8 +667,7 @@ private fun LabeledField(
         OutlinedTextField(
             value = localValue,
             onValueChange = { newValue ->
-                localValue = newValue  // update local state immediately (no lag)
-                onValueChange(newValue)  // sync to ViewModel
+                localValue = newValue  // ONLY update local state — no ViewModel call
             },
             placeholder = { Text(placeholder, style = PocketType.Body, color = ext.textSecondary) },
             textStyle = PocketType.Body.copy(color = ext.textPrimary),
@@ -676,10 +675,11 @@ private fun LabeledField(
             modifier = Modifier
                 .fillMaxWidth()
                 .onFocusChanged { focusState ->
+                    val wasFocused = isFocused
                     isFocused = focusState.isFocused
-                    if (!focusState.isFocused) {
-                        // When losing focus, sync back from ViewModel
-                        localValue = value
+                    // When LOSING focus, push the final value to the ViewModel
+                    if (wasFocused && !focusState.isFocused) {
+                        onValueChange(localValue)
                     }
                 },
             shape = RoundedCornerShape(12.dp),

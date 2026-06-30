@@ -192,21 +192,11 @@ private fun ProviderStep(
         // Provider name
         Text("Provider Name", style = PocketType.Label, color = ext.textSecondary)
         Spacer(Modifier.height(6.dp))
-        OutlinedTextField(
+        com.pocketagent.ui.SmoothTextField(
             value = state.providerName,
             onValueChange = onProviderNameChange,
-            placeholder = { Text("My Gateway", style = PocketType.Body, color = ext.textSecondary) },
-            textStyle = PocketType.Body.copy(color = ext.textPrimary),
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = ext.surface,
-                unfocusedContainerColor = ext.surface,
-                focusedBorderColor = ext.accent,
-                unfocusedBorderColor = ext.divider,
-                cursorColor = ext.accent
-            )
+            placeholder = "My Gateway",
+            modifier = Modifier.fillMaxWidth()
         )
 
         Spacer(Modifier.height(16.dp))
@@ -214,22 +204,12 @@ private fun ProviderStep(
         // Gateway URL
         Text("Gateway URL", style = PocketType.Label, color = ext.textSecondary)
         Spacer(Modifier.height(6.dp))
-        OutlinedTextField(
+        com.pocketagent.ui.SmoothTextField(
             value = state.gatewayUrl,
             onValueChange = onGatewayUrlChange,
-            placeholder = { Text("https://api.gateway.orgn.com/v1", style = PocketType.Body, color = ext.textSecondary) },
-            textStyle = PocketType.Body.copy(color = ext.textPrimary),
-            singleLine = true,
+            placeholder = "https://api.openai.com/v1",
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = ext.surface,
-                unfocusedContainerColor = ext.surface,
-                focusedBorderColor = ext.accent,
-                unfocusedBorderColor = ext.divider,
-                cursorColor = ext.accent
-            )
+            keyboardType = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next)
         )
 
         Spacer(Modifier.height(16.dp))
@@ -237,16 +217,13 @@ private fun ProviderStep(
         // API key
         Text("API Key", style = PocketType.Label, color = ext.textSecondary)
         Spacer(Modifier.height(6.dp))
-        OutlinedTextField(
+        com.pocketagent.ui.SmoothTextField(
             value = state.apiKey,
             onValueChange = onApiKeyChange,
-            placeholder = { Text("sk-…", style = PocketType.Body, color = ext.textSecondary) },
-            textStyle = PocketType.Body.copy(color = ext.textPrimary),
-            singleLine = true,
+            placeholder = "sk-…",
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
+            keyboardType = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
             visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
             trailingIcon = {
                 IconButton(onClick = { showKey = !showKey }) {
                     Text(
@@ -255,14 +232,7 @@ private fun ProviderStep(
                         color = ext.accent
                     )
                 }
-            },
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = ext.surface,
-                unfocusedContainerColor = ext.surface,
-                focusedBorderColor = ext.accent,
-                unfocusedBorderColor = ext.divider,
-                cursorColor = ext.accent
-            )
+            }
         )
 
         Spacer(Modifier.height(24.dp))
