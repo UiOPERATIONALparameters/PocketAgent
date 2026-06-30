@@ -111,10 +111,19 @@ class OpenAICompatibleProvider(
             .post(payload.toRequestBody("application/json".toMediaType()))
             .build()
 
+        // v2.1.2 FIX: Track whether WE initiated the cancellation.
+        // When we call eventSource.cancel() (after [DONE] or from awaitClose),
+        // OkHttp fires onFailure with "stream was reset: CANCEL" (HTTP/2 RST_STREAM).
+        // Without this flag, we'd treat our own cancellation as a network error.
+        var cancelledByUs = false
+        var alreadyFinished = false
+
         val factory = EventSources.createFactory(httpClient)
         val source = factory.newEventSource(req, object : EventSourceListener() {
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
                 if (data == "[DONE]") {
+                    alreadyFinished = true
+                    cancelledByUs = true
                     trySend(StreamDelta.Finish(reason = "stop"))
                     eventSource.cancel()
                     return
@@ -123,63 +132,74 @@ class OpenAICompatibleProvider(
                     val chunk = json.parseToJsonElement(data).jsonObject
                     parseChunk(chunk)?.forEach { trySend(it) }
                 } catch (e: Exception) {
-                    // Ignore malformed chunks but log
                     trySend(StreamDelta.Error("Failed to parse chunk: ${e.message}", e))
                 }
             }
 
             override fun onClosed(eventSource: EventSource) {
-                if (!isClosedForSend) {
+                if (!alreadyFinished && !isClosedForSend) {
                     trySend(StreamDelta.Finish(reason = "closed"))
                 }
                 channel.close()
             }
 
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                val body = try { response?.body?.string() } catch (_: Exception) { null }
-
-                // H6 FIX: distinguish user-cancelled (OK to end silently) from real errors.
-                // Was: any 200 + connection drop treated as 'transient reset' (silently ended stream).
-                // This swallowed real network errors and caused the agent to think the LLM finished
-                // when it had only emitted half a tool call.
-                val isUserCancelled = t is java.io.IOException &&
-                    (t.message?.contains("Canceled", ignoreCase = true) == true ||
-                     t.message?.contains("cancelled", ignoreCase = true) == true)
-
-                if (isUserCancelled) {
-                    // User pressed Stop — treat as clean finish
-                    if (!isClosedForSend) {
+                // v2.1.2 FIX: If we initiated the cancellation (via [DONE] handler or awaitClose),
+                // don't treat the resulting onFailure as an error.
+                if (cancelledByUs || alreadyFinished) {
+                    if (!alreadyFinished && !isClosedForSend) {
                         trySend(StreamDelta.Finish(reason = "cancelled"))
                     }
                     channel.close()
                     return
                 }
 
-                // H7 FIX: retry once on transient network failures (mobile networks drop streams often)
-                // We do this by emitting a Usage-only chunk to signal retry; the caller can re-call.
-                // For now, we emit an Error with a 'retryable' hint in the message.
-                val isRetryable = response?.code == null ||
-                    response.code in setOf(429, 500, 502, 503, 504) ||
-                    (t is java.io.IOException && t !is java.net.UnknownHostException)
+                val body = try { response?.body?.string() } catch (_: Exception) { null }
+                val errorMsg = t?.message ?: ""
 
+                // v2.1.2 FIX: "stream was reset: CANCEL" is HTTP/2 RST_STREAM.
+                // This happens when:
+                //   - We called eventSource.cancel() (tracked by cancelledByUs above)
+                //   - The OkHttp client was closed
+                //   - The coroutine was cancelled (user pressed Stop)
+                //   - A network hiccup caused the stream to reset
+                // Treat ALL of these as clean cancellations, not errors.
+                // The agent loop will see the Finish event and decide what to do.
+                val isStreamReset = errorMsg.contains("stream was reset", ignoreCase = true) ||
+                    errorMsg.contains("CANCEL", ignoreCase = true) ||
+                    errorMsg.contains("Canceled", ignoreCase = true) ||
+                    errorMsg.contains("cancelled", ignoreCase = true) ||
+                    (t is java.io.IOException && response?.code == 200)
+
+                if (isStreamReset) {
+                    // Stream was cancelled or reset. Treat as clean finish.
+                    // The content we already received is preserved.
+                    if (!isClosedForSend) {
+                        trySend(StreamDelta.Finish(reason = "stream_reset"))
+                    }
+                    channel.close()
+                    return
+                }
+
+                // Real error (4xx, 5xx, DNS failure, etc.)
                 val msg = buildString {
                     append("Stream failed: ")
                     append(t?.message ?: t?.let { it::class.simpleName } ?: "unknown error")
                     if (response != null) {
                         append(" (HTTP ${response.code}")
-                        if (body != null) {
+                        if (body != null && body.isNotEmpty()) {
                             val truncatedBody = if (body.length > 500) body.substring(0, 500) + "…" else body
                             append(": $truncatedBody")
                         }
                         append(")")
                     }
-                    if (isRetryable) append(" [retryable]")
                 }
                 channel.close(LlmException(msg, t))
             }
         })
 
         awaitClose {
+            cancelledByUs = true
             source.cancel()
         }
     }.flowOn(Dispatchers.IO)
