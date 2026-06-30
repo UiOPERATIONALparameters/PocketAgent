@@ -212,10 +212,10 @@ class SettingsViewModel @Inject constructor(
     fun installLinux() {
         if (_state.value.linuxInstalling) return
 
-        // Check storage first (need ~50MB free for Alpine rootfs — 3MB download + ~15MB extracted)
-        if (!linuxEnv.hasEnoughStorage(50)) {
+        // Check storage first (need ~200MB free for Ubuntu rootfs — 28MB download + ~150MB extracted)
+        if (!linuxEnv.hasEnoughStorage(200)) {
             _state.update {
-                it.copy(linuxStatus = "Not enough free storage. Need at least 50MB free. Please delete some files and try again.")
+                it.copy(linuxStatus = "Not enough free storage. Need at least 200MB free. Please delete some files and try again.")
             }
             return
         }

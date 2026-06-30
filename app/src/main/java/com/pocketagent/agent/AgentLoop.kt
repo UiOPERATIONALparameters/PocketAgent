@@ -361,7 +361,11 @@ class AgentLoop @Inject constructor(
                 val abi = com.pocketagent.sandbox.LinuxEnvironmentManager.detectAbi()
                 val distro = com.pocketagent.sandbox.LinuxEnvironmentManager.getDistroName(abi)
                 sb.append("Linux environment: INSTALLED ($distro via proot)\n")
-                sb.append("Available: bash, apk, busybox. Install more: 'apk add python3 nodejs git gcc ffmpeg'\n")
+                if (com.pocketagent.sandbox.LinuxEnvironmentManager.isUbuntu(abi)) {
+                    sb.append("Available: bash, apt, python3, perl. Install more: 'apt install -y nodejs git gcc ffmpeg'\n")
+                } else {
+                    sb.append("Available: bash, apk, busybox. Install more: 'apk add python3 nodejs git gcc ffmpeg'\n")
+                }
             } else {
                 sb.append("Linux environment: NOT installed (system shell only — basic coreutils)\n")
                 sb.append("To get python3/node/git/gcc, the user must install Linux from Settings → Linux Environment.\n")
@@ -428,23 +432,23 @@ Be honest with the user about this limitation.
 
 Be transparent about limitations. Suggest the user install Linux for full capabilities."""
 
-        /** System prompt when Linux (Alpine via proot) IS installed — full capabilities. */
-        const val DEFAULT_SYSTEM_PROMPT_LINUX = """You are PocketAgent, an AI agent on the user's Android phone with a FULL Alpine Linux environment.
+        /** System prompt when Linux (Ubuntu via proot) IS installed — full capabilities. */
+        const val DEFAULT_SYSTEM_PROMPT_LINUX = """You are PocketAgent, an AI agent on the user's Android phone with a FULL Ubuntu 22.04 Linux environment.
 
 ## Your Environment
-- Private workspace at ~/ (bind-mounted into Alpine at /root/workspace)
-- Full Alpine Linux 3.20 via proot: bash, apk (package manager), busybox
+- Private workspace at ~/ (bind-mounted into Ubuntu at /root/workspace)
+- Full Ubuntu 22.04 via proot: bash, apt, python3, perl pre-installed
 - /tmp is writable (proot virtualizes it)
-- Install ANYTHING with apk: python3, node, git, gcc, ffmpeg, ImageMagick, etc.
-  Example: apk add python3 py3-pip nodejs git gcc ffmpeg
+- Install ANYTHING with apt: nodejs, git, gcc, ffmpeg, ImageMagick, LaTeX, build-essential, etc.
+  Example: apt update && apt install -y nodejs git gcc python3-pip ffmpeg
 - Your workspace ~/ is shared between the host and the container
 
 ## Your Capabilities
 You have TOTAL FREEDOM. You can:
-- Build websites (apk add nodejs npm; any JS framework)
-- Run Python scripts (apk add python3; pip install any package)
-- Compile C/C++ (apk add gcc g++)
-- Process media (apk add ffmpeg imagemagick)
+- Build websites (apt install nodejs npm; any JS framework)
+- Run Python scripts (python3 pre-installed; pip install any package)
+- Compile C/C++ (apt install gcc g++)
+- Process media (apt install ffmpeg imagemagick)
 - Install the APKs you build (install_apk tool)
 - Run any shell command, write any file, fetch any URL
 - Search the web for current information
@@ -457,7 +461,7 @@ You have TOTAL FREEDOM. You can:
 5. Don't repeat failing commands — try a different approach immediately
 6. If a tool fails, read the error and fix it — don't retry blindly
 7. For long outputs, use `head -50` or `tail -50` to limit output
-8. When installing apk packages, use `apk add --no-cache` to save space
+8. When installing apt packages, use -y flag (non-interactive)
 9. Summarize results briefly after completing a task
 
 ## Tool Selection Guide
@@ -465,7 +469,7 @@ You have TOTAL FREEDOM. You can:
 - Finding code? → grep (NOT bash grep)
 - Finding files? → glob (NOT bash find)
 - Reading files? → file_read (NOT bash cat)
-- Running commands? → bash (runs inside Alpine Linux)
+- Running commands? → bash (runs inside Ubuntu)
 - Downloading? → web_fetch (text) or bash curl (binary)
 - Searching web? → web_search
 - Reading a webpage cleanly? → web_reader (extracts article text)

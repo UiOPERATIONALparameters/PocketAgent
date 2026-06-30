@@ -66,16 +66,15 @@ class LinuxEnvironmentManager @Inject constructor(
         const val MARKER_FILE = ".linux_installed"
         const val PROOT_VERSION = "5.1.0-static"
 
-        // v2.2.0: Use Alpine for ALL architectures (3MB download vs 28MB for Ubuntu).
-        // Alpine has: bash, apk (package manager), busybox, AND can install python3, node, git, gcc, etc.
-        // This is MUCH smaller and faster to install, and works on devices with low storage.
-        // For users who specifically need Ubuntu/apt, we can add an option in v2.3.
+        // v2.3.0: Use Ubuntu for aarch64 and x86_64 (has python3/bash/perl pre-installed).
+        // Use Alpine for 32-bit ARM and x86 (Ubuntu doesn't publish those archs).
+        // Both can install anything via package manager (apt/apk).
         private fun rootfsUrl(abi: String): String = when (abi) {
-            "aarch64" -> "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/aarch64/alpine-minirootfs-3.20.0-aarch64.tar.gz"
-            "x86_64" -> "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/x86_64/alpine-minirootfs-3.20.0-x86_64.tar.gz"
+            "aarch64" -> "https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04-base-arm64.tar.gz"
+            "x86_64" -> "https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04-base-amd64.tar.gz"
             "arm" -> "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/armhf/alpine-minirootfs-3.20.0-armhf.tar.gz"
             "i686" -> "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/x86/alpine-minirootfs-3.20.0-x86.tar.gz"
-            else -> "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/aarch64/alpine-minirootfs-3.20.0-aarch64.tar.gz"
+            else -> "https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04-base-arm64.tar.gz"
         }
 
         /** Map Android Build.SUPPORTED_ABIS to our ABI name. */
@@ -90,9 +89,9 @@ class LinuxEnvironmentManager @Inject constructor(
             }
         }
 
-        /** v2.2.0: All rootfs are Alpine now (smaller, faster, works everywhere). */
-        fun isUbuntu(abi: String): Boolean = false
-        fun getDistroName(abi: String): String = "Alpine Linux 3.20"
+        /** v2.3.0: Ubuntu for 64-bit, Alpine for 32-bit. */
+        fun isUbuntu(abi: String): Boolean = abi in setOf("aarch64", "x86_64")
+        fun getDistroName(abi: String): String = if (isUbuntu(abi)) "Ubuntu 22.04 LTS" else "Alpine 3.20"
     }
 
     val prootDir: File = File(context.filesDir, "proot")
@@ -182,7 +181,7 @@ class LinuxEnvironmentManager @Inject constructor(
             }
 
             // Verify download (Ubuntu is ~27MB, Alpine is ~3MB)
-            val minSize = 2_000_000  // 2MB minimum (Alpine is ~3MB compressed)
+            val minSize = if (isUbuntu(abi)) 20_000_000 else 2_000_000
             if (!archiveFile.exists() || archiveFile.length() < minSize) {
                 archiveFile.delete()
                 return@withContext Result.failure(IOException("Downloaded rootfs is too small (${archiveFile.length()} bytes) — likely a partial download. Check your connection."))
@@ -392,37 +391,157 @@ class LinuxEnvironmentManager @Inject constructor(
     }
 
     private fun extractRootfs(archiveFile: File, targetDir: File) {
-        // Ubuntu/Alpine rootfs is .tar.gz — use Apache Commons Compress for reliable extraction
+        // v2.3.0: Complete rewrite with proper symlink, directory, and permission handling.
+        // Uses a two-pass approach:
+        //   Pass 1: Extract all regular files and directories
+        //   Pass 2: Create all symlinks (after directories exist)
+        // This ensures parent directories exist before we try to create symlinks.
+
+        val tarEntries = mutableListOf<Triple<String, Int, TarArchiveEntry>>()
+
+        // Pass 1: Extract files and directories
         archiveFile.inputStream().buffered().use { fis ->
             GzipCompressorInputStream(fis).use { gzis ->
                 TarArchiveInputStream(gzis).use { tis ->
-                    var entry = tis.nextEntry
+                    var entry = tis.nextEntry as? TarArchiveEntry
                     while (entry != null) {
-                        val entryPath = entry.name
-                        // Block path traversal
-                        if (entryPath.contains("..") || entryPath.startsWith("/")) {
-                            entry = tis.nextEntry
+                        // Strip "./" prefix (Alpine uses it, Ubuntu doesn't)
+                        var entryPath = entry.name
+                        if (entryPath.startsWith("./")) entryPath = entryPath.substring(2)
+                        if (entryPath.isEmpty()) {
+                            entry = tis.nextEntry as? TarArchiveEntry
                             continue
                         }
+                        // Block path traversal
+                        if (entryPath.contains("..") || entryPath.startsWith("/")) {
+                            entry = tis.nextEntry as? TarArchiveEntry
+                            continue
+                        }
+
                         val outFile = File(targetDir, entryPath)
-                        if (entry.isDirectory) {
+
+                        if (entry.isSymbolicLink) {
+                            // Save symlink info for Pass 2
+                            tarEntries.add(Triple(entryPath, 1, entry))
+                        } else if (entry.isDirectory) {
                             outFile.mkdirs()
+                            outFile.setExecutable(true, false)
+                            outFile.setReadable(true, false)
+                            outFile.setWritable(true, false)
+                        } else if (entry.isLink) {
+                            // Hard link — save for Pass 2 (needs target to exist)
+                            tarEntries.add(Triple(entryPath, 2, entry))
                         } else {
+                            // Regular file
                             outFile.parentFile?.mkdirs()
                             FileOutputStream(outFile).use { tis.copyTo(it) }
-                            // Preserve executable bit for binaries
-                            if (entryPath.startsWith("bin/") || entryPath.startsWith("usr/bin/") ||
-                                entryPath.startsWith("sbin/") || entryPath.startsWith("usr/sbin/") ||
-                                entryPath.startsWith("usr/libexec/")) {
+
+                            // Set executable on ALL binaries + shared libraries
+                            val isBinary = entryPath.startsWith("bin/") ||
+                                entryPath.startsWith("sbin/") ||
+                                entryPath.startsWith("usr/bin/") ||
+                                entryPath.startsWith("usr/sbin/") ||
+                                entryPath.startsWith("usr/libexec/") ||
+                                entryPath.startsWith("lib/ld-") ||
+                                entryPath.startsWith("usr/lib/ld-") ||
+                                entryPath.startsWith("lib/libc") ||
+                                entryPath.startsWith("lib/libm") ||
+                                entryPath.startsWith("lib/libdl") ||
+                                entryPath.startsWith("lib/libpthread") ||
+                                entryPath.startsWith("lib/librt") ||
+                                entryPath.startsWith("usr/lib/libc") ||
+                                entryPath.startsWith("usr/lib/libm")
+
+                            // Also check the tar entry mode for execute bit
+                            val mode = entry.mode
+                            val hasExecuteBit = (mode and 0b001_000_000) != 0 ||
+                                (mode and 0b000_001_000) != 0 ||
+                                (mode and 0b000_000_001) != 0
+
+                            if (isBinary || hasExecuteBit) {
                                 outFile.setExecutable(true, false)
                             }
-                            // Make everything readable
                             outFile.setReadable(true, false)
                         }
-                        entry = tis.nextEntry
+                        entry = tis.nextEntry as? TarArchiveEntry
                     }
                 }
             }
         }
+
+        // Pass 2: Create symlinks and hard links
+        for ((entryPath, linkType, entry) in tarEntries) {
+            val linkFile = File(targetDir, entryPath)
+            val linkPath = linkFile.toPath()
+            val target = entry.linkName
+
+            try {
+                // Delete existing file/dir at link path
+                if (linkFile.exists()) linkFile.delete()
+                if (java.nio.file.Files.isSymbolicLink(linkPath)) java.nio.file.Files.delete(linkPath)
+
+                // Create parent directories if needed
+                linkFile.parentFile?.mkdirs()
+
+                if (linkType == 1) {
+                    // Symbolic link
+                    java.nio.file.Files.createSymbolicLink(linkPath, java.nio.file.Paths.get(target))
+                } else {
+                    // Hard link
+                    val targetFile = File(targetDir, target)
+                    if (targetFile.exists()) {
+                        java.nio.file.Files.createLink(linkPath, targetFile.toPath())
+                    }
+                }
+            } catch (e: Exception) {
+                // Fallback: if symlink creation fails (some Android versions block it),
+                // try copying the target file
+                try {
+                    val targetFile = File(targetDir, target)
+                    if (targetFile.isFile) {
+                        targetFile.copyTo(linkFile, overwrite = true)
+                        if (targetFile.canExecute()) linkFile.setExecutable(true, false)
+                    } else if (targetFile.isDirectory) {
+                        // Can't copy a directory — create a real directory instead
+                        linkFile.mkdirs()
+                    }
+                } catch (_: Exception) {
+                    // Last resort: create empty file so path exists
+                    linkFile.createNewFile()
+                }
+            }
+        }
+
+        // Final pass: ensure critical paths exist
+        // If /bin is a symlink that failed to create, make it a real directory
+        val binDir = File(targetDir, "bin")
+        if (!binDir.exists()) {
+            binDir.mkdirs()
+            // Copy critical binaries from usr/bin
+            val usrBin = File(targetDir, "usr/bin")
+            if (usrBin.exists()) {
+                listOf("sh", "bash", "dash").forEach { name ->
+                    val src = File(usrBin, name)
+                    if (src.exists()) {
+                        val dst = File(binDir, name)
+                        src.copyTo(dst, overwrite = true)
+                        dst.setExecutable(true, false)
+                        dst.setReadable(true, false)
+                    }
+                }
+            }
+        }
+
+        // Ensure /tmp exists and is writable
+        val tmpDir = File(targetDir, "tmp")
+        if (!tmpDir.exists()) tmpDir.mkdirs()
+        tmpDir.setWritable(true, false)
+        tmpDir.setReadable(true, false)
+        tmpDir.setExecutable(true, false)
+
+        // Ensure /root exists
+        val rootHome = File(targetDir, "root")
+        if (!rootHome.exists()) rootHome.mkdirs()
+        rootHome.setWritable(true, false)
     }
 }
