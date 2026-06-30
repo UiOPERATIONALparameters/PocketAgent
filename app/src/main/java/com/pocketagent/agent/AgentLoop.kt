@@ -7,6 +7,7 @@ import com.pocketagent.llm.LlmProvider
 import com.pocketagent.llm.LlmRequest
 import com.pocketagent.llm.StreamDelta
 import com.pocketagent.llm.ToolSpec
+import com.pocketagent.sandbox.Workspace
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -16,13 +17,14 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import java.io.File
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
  * The agent loop:
- * 1. Send messages + tool specs to the LLM
+ * 1. Send messages + tool specs + workspace state to the LLM
  * 2. Stream the response back
  * 3. If the LLM emits a tool call, execute it and feed result back
  * 4. Repeat until the LLM finishes with no tool calls
@@ -34,10 +36,18 @@ import javax.inject.Singleton
  *   assistant { tool_calls: [...] }
  *   tool { tool_call_id: X, content: ... }
  * Without the assistant message, the API rejects with "tool call id not found".
+ *
+ * v2.0 changes:
+ *  - Dynamic system prompt with tool list (H1)
+ *  - maxIterations default 30 → 50 (H2)
+ *  - Token save mode: don't disable tools, just truncate results (H3)
+ *  - Preserve assistant content before tool calls (H4)
+ *  - Workspace state injection: pwd, ls, git status (z.ai ZCode pattern)
  */
 @Singleton
 class AgentLoop @Inject constructor(
-    private val toolRouter: ToolRouter
+    private val toolRouter: ToolRouter,
+    private val workspace: Workspace
 ) {
     data class Event(
         val type: Type,
@@ -48,13 +58,13 @@ class AgentLoop @Inject constructor(
         val toolArguments: String? = null,
         val toolResult: String? = null,
         val toolDisplay: String? = null,
-        val toolCalls: List<ChatMessage.ToolCall>? = null,  // for TOOL_CALLS_READY
+        val toolCalls: List<ChatMessage.ToolCall>? = null,
         val error: String? = null
     ) {
         enum class Type {
             CONTENT_DELTA,
             REASONING_DELTA,
-            TOOL_CALLS_READY,   // NEW: all tool calls accumulated, about to execute
+            TOOL_CALLS_READY,
             TOOL_CALL_START,
             TOOL_RESULT,
             FINISHED,
@@ -72,22 +82,19 @@ class AgentLoop @Inject constructor(
         modelId: String,
         messages: List<ChatMessage>,
         systemPrompt: String = DEFAULT_SYSTEM_PROMPT,
-        maxIterations: Int = 30,
-        tokenSaveMode: Boolean = false
+        maxIterations: Int = 50,  // H2: was 30, too low for build tasks
+        tokenSaveMode: Boolean = false,
+        temperature: Float = 0.7f  // H5: configurable
     ): Flow<Event> = flow {
-        // In token save mode: use minimal system prompt and no tools
-        val effectiveSystemPrompt = if (tokenSaveMode) {
-            // Minimal prompt — just the user's custom prompt if set, otherwise very short
-            if (systemPrompt != DEFAULT_SYSTEM_PROMPT) systemPrompt else "You are PocketAgent, a helpful AI assistant."
-        } else {
-            systemPrompt
-        }
+        // H1: build dynamic system prompt with tool list + workspace state
+        val effectiveSystemPrompt = buildSystemPrompt(systemPrompt, tokenSaveMode)
 
         var currentMessages = mutableListOf<ChatMessage>().apply {
             add(ChatMessage(role = ChatMessage.Role.System, content = effectiveSystemPrompt))
             addAll(messages)
         }
-        val tools = if (tokenSaveMode) emptyList() else toolRouter.specs()
+        // H3: token save mode no longer disables tools — it just truncates results
+        val tools = toolRouter.specs()
         val knownToolNames = tools.map { it.name }.toSet()
 
         for (iteration in 0 until maxIterations) {
@@ -95,7 +102,7 @@ class AgentLoop @Inject constructor(
                 model = modelId,
                 messages = currentMessages.toList(),
                 tools = tools,
-                temperature = 0.7f
+                temperature = temperature
             )
 
             val contentBuilder = StringBuilder()
@@ -112,8 +119,11 @@ class AgentLoop @Inject constructor(
                             emit(Event(Event.Type.CONTENT_DELTA, content = delta.text))
                         }
                         is StreamDelta.Reasoning -> {
-                            reasoningBuilder.append(delta.text)
-                            emit(Event(Event.Type.REASONING_DELTA, reasoning = delta.text))
+                            // H3: skip reasoning in token save mode
+                            if (!tokenSaveMode) {
+                                reasoningBuilder.append(delta.text)
+                                emit(Event(Event.Type.REASONING_DELTA, reasoning = delta.text))
+                            }
                         }
                         is StreamDelta.ToolCall -> {
                             val acc = toolCallAccumulators.getOrPut(delta.index) {
@@ -150,9 +160,7 @@ class AgentLoop @Inject constructor(
             }
 
             if (streamError != null) {
-                // Extract to non-null local val
                 val err: String = streamError!!
-                // Provide helpful messages for common errors
                 val helpfulError = when {
                     err.contains("400", ignoreCase = true) && err.contains("image", ignoreCase = true) ->
                         "This model doesn't support images. Please select a vision model (look for 'vision' badge in Settings). Error: $err"
@@ -182,10 +190,12 @@ class AgentLoop @Inject constructor(
                 )
             }
 
+            val assistantContent = contentBuilder.toString().ifEmpty { null }
+            val assistantReasoning = reasoningBuilder.toString().ifEmpty { null }
             val assistantMsg = ChatMessage(
                 role = ChatMessage.Role.Assistant,
-                content = contentBuilder.toString().ifEmpty { null },
-                reasoning = reasoningBuilder.toString().ifEmpty { null },
+                content = assistantContent,
+                reasoning = assistantReasoning,
                 toolCalls = toolCalls
             )
             currentMessages.add(assistantMsg)
@@ -196,146 +206,175 @@ class AgentLoop @Inject constructor(
                 return@flow
             }
 
+            // H4: If there was content before tool calls, emit it as a final delta
+            // (already done via CONTENT_DELTA above, but make sure UI sees it before tool cards)
+            // The TOOL_CALLS_READY event signals the UI to flush any pending content.
+
             // CRITICAL: Emit TOOL_CALLS_READY so caller can persist the assistant
             // message with tool_calls BEFORE the tool result messages.
-            // Without this, the next LLM call will fail with "tool call id not found".
             emit(Event(
                 type = Event.Type.TOOL_CALLS_READY,
                 toolCalls = toolCalls,
-                content = contentBuilder.toString().ifEmpty { "" },
-                reasoning = reasoningBuilder.toString().ifEmpty { "" }
+                content = assistantContent ?: "",
+                reasoning = assistantReasoning ?: ""
             ))
 
             // Execute each tool call
             for (tc in toolCalls) {
-                // Validate tool name
                 if (tc.name.isBlank()) {
                     val errMsg = "Tool call received with empty name. Arguments: ${tc.arguments.take(200)}"
-                    emit(Event(
-                        type = Event.Type.TOOL_CALL_START,
-                        toolCallId = tc.id,
-                        toolName = "(empty)",
-                        toolArguments = tc.arguments
-                    ))
-                    val errorJson = buildJsonObject {
-                        put("error", JsonPrimitive(errMsg))
-                    }.toString()
-                    emit(Event(
-                        type = Event.Type.TOOL_RESULT,
-                        toolCallId = tc.id,
-                        toolName = "(empty)",
-                        toolResult = errorJson,
-                        toolDisplay = errMsg
-                    ))
-                    currentMessages.add(ChatMessage(
-                        role = ChatMessage.Role.Tool,
-                        content = errorJson,
-                        toolCallId = tc.id,
-                        name = tc.name.ifBlank { "unknown" }
-                    ))
+                    emit(Event(Event.Type.TOOL_CALL_START, toolCallId = tc.id, toolName = "(empty)", toolArguments = tc.arguments))
+                    val errorJson = buildJsonObject { put("error", JsonPrimitive(errMsg)) }.toString()
+                    emit(Event(Event.Type.TOOL_RESULT, toolCallId = tc.id, toolName = "(empty)", toolResult = errorJson, toolDisplay = errMsg))
+                    currentMessages.add(ChatMessage(role = ChatMessage.Role.Tool, content = errorJson, toolCallId = tc.id, name = tc.name.ifBlank { "unknown" }))
                     continue
                 }
 
                 if (tc.name !in knownToolNames) {
                     val errMsg = "Unknown tool: '${tc.name}'. Available tools: ${knownToolNames.joinToString(", ")}"
-                    emit(Event(
-                        type = Event.Type.TOOL_CALL_START,
-                        toolCallId = tc.id,
-                        toolName = tc.name,
-                        toolArguments = tc.arguments
-                    ))
-                    val errorJson = buildJsonObject {
-                        put("error", JsonPrimitive(errMsg))
-                    }.toString()
-                    emit(Event(
-                        type = Event.Type.TOOL_RESULT,
-                        toolCallId = tc.id,
-                        toolName = tc.name,
-                        toolResult = errorJson,
-                        toolDisplay = "Error: $errMsg"
-                    ))
-                    currentMessages.add(ChatMessage(
-                        role = ChatMessage.Role.Tool,
-                        content = errorJson,
-                        toolCallId = tc.id,
-                        name = tc.name
-                    ))
+                    emit(Event(Event.Type.TOOL_CALL_START, toolCallId = tc.id, toolName = tc.name, toolArguments = tc.arguments))
+                    val errorJson = buildJsonObject { put("error", JsonPrimitive(errMsg)) }.toString()
+                    emit(Event(Event.Type.TOOL_RESULT, toolCallId = tc.id, toolName = tc.name, toolResult = errorJson, toolDisplay = "Error: $errMsg"))
+                    currentMessages.add(ChatMessage(role = ChatMessage.Role.Tool, content = errorJson, toolCallId = tc.id, name = tc.name))
                     continue
                 }
 
-                // Parse arguments
                 val args = try {
                     json.parseToJsonElement(tc.arguments.ifEmpty { "{}" })
                 } catch (e: Exception) {
-                    emit(Event(
-                        type = Event.Type.TOOL_CALL_START,
-                        toolCallId = tc.id,
-                        toolName = tc.name,
-                        toolArguments = tc.arguments
-                    ))
+                    emit(Event(Event.Type.TOOL_CALL_START, toolCallId = tc.id, toolName = tc.name, toolArguments = tc.arguments))
                     val errMsg = "Invalid JSON arguments: ${e.message}. Raw: ${tc.arguments.take(200)}"
-                    val errorJson = buildJsonObject {
-                        put("error", JsonPrimitive(errMsg))
-                    }.toString()
-                    emit(Event(
-                        type = Event.Type.TOOL_RESULT,
-                        toolCallId = tc.id,
-                        toolName = tc.name,
-                        toolResult = errorJson,
-                        toolDisplay = "Error: $errMsg"
-                    ))
-                    currentMessages.add(ChatMessage(
-                        role = ChatMessage.Role.Tool,
-                        content = errorJson,
-                        toolCallId = tc.id,
-                        name = tc.name
-                    ))
+                    val errorJson = buildJsonObject { put("error", JsonPrimitive(errMsg)) }.toString()
+                    emit(Event(Event.Type.TOOL_RESULT, toolCallId = tc.id, toolName = tc.name, toolResult = errorJson, toolDisplay = "Error: $errMsg"))
+                    currentMessages.add(ChatMessage(role = ChatMessage.Role.Tool, content = errorJson, toolCallId = tc.id, name = tc.name))
                     continue
                 }
 
-                // Emit tool call start
-                emit(Event(
-                    type = Event.Type.TOOL_CALL_START,
-                    toolCallId = tc.id,
-                    toolName = tc.name,
-                    toolArguments = tc.arguments
-                ))
+                emit(Event(Event.Type.TOOL_CALL_START, toolCallId = tc.id, toolName = tc.name, toolArguments = tc.arguments))
 
-                // Execute
                 val result = try {
                     toolRouter.execute(tc.name, args)
                 } catch (e: Exception) {
                     ToolResult.Error("Execution failed: ${e.message ?: e::class.simpleName}")
                 }
 
+                // H3: in token save mode, truncate tool results more aggressively
+                val maxResultBytes = if (tokenSaveMode) 5_000 else 30_000
                 val (output, display) = when (result) {
-                    is ToolResult.Success -> result.output.toString() to (result.display ?: "")
-                    is ToolResult.Error -> buildJsonObject {
+                    is ToolResult.Success -> truncateResult(result.output.toString(), maxResultBytes) to (result.display ?: "")
+                    is ToolResult.Error -> truncateResult(buildJsonObject {
                         put("error", JsonPrimitive(result.message))
-                    }.toString() to (result.display ?: "Error: ${result.message}")
+                    }.toString(), maxResultBytes) to (result.display ?: "Error: ${result.message}")
                 }
 
-                emit(Event(
-                    type = Event.Type.TOOL_RESULT,
-                    toolCallId = tc.id,
-                    toolName = tc.name,
-                    toolResult = output,
-                    toolDisplay = display
-                ))
+                emit(Event(Event.Type.TOOL_RESULT, toolCallId = tc.id, toolName = tc.name, toolResult = output, toolDisplay = display))
 
-                currentMessages.add(ChatMessage(
-                    role = ChatMessage.Role.Tool,
-                    content = output,
-                    toolCallId = tc.id,
-                    name = tc.name
-                ))
+                currentMessages.add(ChatMessage(role = ChatMessage.Role.Tool, content = output, toolCallId = tc.id, name = tc.name))
             }
             // Loop back to LLM with tool results
         }
 
         // Hit max iterations
-        emit(Event(Event.Type.CONTENT_DELTA, content = "\n\n*[Reached maximum tool call iterations ($maxIterations). Stopping to prevent infinite loops.]*"))
+        emit(Event(Event.Type.CONTENT_DELTA, content = "\n\n*[Reached maximum tool call iterations ($maxIterations). Stopping to prevent infinite loops. Type 'continue' to resume.]*"))
         emit(Event(Event.Type.FINISHED))
+    }
+
+    /**
+     * H1 + workspace state injection: build a dynamic system prompt that includes:
+     *  - The user's custom prompt (if set) or the default
+     *  - A list of available tools with one-line descriptions (no more hardcoded "9 tools")
+     *  - Current workspace state: pwd, top-level files, git status (ZCode pattern)
+     */
+    private suspend fun buildSystemPrompt(userPrompt: String, tokenSaveMode: Boolean): String {
+        val sb = StringBuilder()
+
+        // Base prompt
+        sb.append(if (userPrompt.isNotBlank() && userPrompt != DEFAULT_SYSTEM_PROMPT) {
+            userPrompt
+        } else {
+            DEFAULT_SYSTEM_PROMPT
+        })
+        sb.append("\n\n")
+
+        // H1: dynamic tool list
+        val tools = toolRouter.specs()
+        sb.append("## Available Tools (${tools.size} total)\n")
+        for (tool in tools) {
+            val oneLineDesc = tool.description.lines().firstOrNull()?.trim() ?: ""
+            sb.append("- ${tool.name}: $oneLineDesc\n")
+        }
+        sb.append("\n")
+
+        // Workspace state injection (skip in token save mode to save tokens)
+        if (!tokenSaveMode) {
+            sb.append("## Current Workspace State\n")
+            sb.append(generateWorkspaceState())
+            sb.append("\n")
+        }
+
+        return sb.toString()
+    }
+
+    /**
+     * Generate workspace state info: pwd, top-level files, git status.
+     * This is what makes the agent feel "contextually aware" like z.ai ZCode.
+     */
+    private fun generateWorkspaceState(): String {
+        return try {
+            val sb = StringBuilder()
+            val home = workspace.homeDir
+
+            // pwd
+            sb.append("Working directory: ~ (workspace root)\n")
+
+            // Top-level files (max 20)
+            val entries = home.listFiles()
+                ?.filter { it.name != "." && it.name != ".." && !it.name.startsWith(".state") }
+                ?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
+                ?.take(20)
+                ?: emptyList()
+
+            if (entries.isNotEmpty()) {
+                sb.append("Top-level entries:\n")
+                for (e in entries) {
+                    val type = if (e.isDirectory) "[dir] " else "[file]"
+                    val size = if (e.isFile) " ${e.length() / 1024}KB" else ""
+                    sb.append("  $type ${e.name}$size\n")
+                }
+            } else {
+                sb.append("(workspace is empty)\n")
+            }
+
+            // git status if there's a .git directory
+            val gitDir = File(home, ".git")
+            if (gitDir.exists()) {
+                sb.append("Git: repository present\n")
+            }
+
+            // Bootstrap status
+            val bootstrapInstalled = File(home.parentFile, "usr/.bootstrap_installed").exists()
+            sb.append("Linux environment: ${if (bootstrapInstalled) "installed (bash, python3, node, git, curl)" else "not installed (Settings → Install Linux Environment)"}\n")
+
+            // proot-distro status
+            val prootDir = File(home.parentFile, "proot-distro")
+            if (prootDir.exists()) {
+                val distros = prootDir.listFiles { f -> f.isDirectory && File(f, "bin/sh").exists() }
+                    ?.map { it.name } ?: emptyList()
+                if (distros.isNotEmpty()) {
+                    sb.append("Linux distros available: ${distros.joinToString(", ")}\n")
+                }
+            }
+
+            sb.toString()
+        } catch (_: Exception) {
+            "(workspace state unavailable)"
+        }
+    }
+
+    /** Truncate tool result to fit within maxBytes. */
+    private fun truncateResult(result: String, maxBytes: Int): String {
+        if (result.length <= maxBytes) return result
+        return result.substring(0, maxBytes) + "\n...[truncated, ${result.length - maxBytes} more chars]"
     }
 
     private data class ToolCallAccumulator(
@@ -351,17 +390,14 @@ class AgentLoop @Inject constructor(
 Private Linux workspace at ~/ with subdirectories: projects/, tmp/, downloads/
 If Linux is installed (Termux bootstrap), you have: bash, python3, node, git, curl, wget, apt/pkg, gcc, clang, and more.
 Install packages with: pkg install <name> or pip install <name>
+For full Debian/Ubuntu access (apt install ffmpeg, imagemagick, etc.), ask the user to install proot-distro from Settings.
 
-## Your Tools (9 total)
-- bash: Run shell commands (600s timeout). Use for everything shell-related.
-- file_read: Read files (use start_line/end_line for large files)
-- file_write: Create new files or append
-- str_replace: **PREFERRED for editing** — surgical find-and-replace in existing files
-- file_list: List directory contents
-- grep: Search file contents with regex (structured results)
-- glob: Find files by pattern
-- web_fetch: Fetch URLs via HTTP
-- web_search: Search the web via DuckDuckGo
+## Your Capabilities
+You have TOTAL FREEDOM. You can:
+- Build APKs (gradle), websites, scripts, documents, anything
+- Install the APKs you build (install_apk tool launches the system installer)
+- Run any shell command, write any file, fetch any URL
+- Search the web for current information
 
 ## Efficiency Rules (CRITICAL)
 1. PREFER str_replace over file_write for editing existing files
@@ -379,14 +415,15 @@ Install packages with: pkg install <name> or pip install <name>
 - Finding files? → glob (NOT bash find)
 - Reading files? → file_read (NOT bash cat)
 - Running commands? → bash
-- Downloading? → web_fetch or bash curl
+- Downloading? → web_fetch (text) or bash curl (binary)
 - Searching web? → web_search
+- Built an APK? → install_apk to let the user install it
 
 ## Troubleshooting
 - "Permission denied" → chmod +x <file>
 - "command not found" → pkg install <package>
 - "library not found" → check LD_LIBRARY_PATH, create symlinks
-- /tmp issues → use ${'$'}TMPDIR or ~/tmp instead
+- /tmp issues → use ${'$'}TMPDIR or ~/tmp instead (proot-distro containers have their own /tmp)
 
 You have TOTAL FREEDOM. Create, delete, install, build anything.
 The user sees every tool call. Be transparent but concise."""

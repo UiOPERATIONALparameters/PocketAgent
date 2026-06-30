@@ -317,7 +317,8 @@ class ChatViewModel @Inject constructor(
                         messages = history,
                         systemPrompt = settings.settings.value.systemPrompt.ifBlank { AgentLoop.DEFAULT_SYSTEM_PROMPT },
                         maxIterations = settings.settings.value.maxToolIterations,
-                        tokenSaveMode = settings.settings.value.tokenSaveMode
+                        tokenSaveMode = settings.settings.value.tokenSaveMode,
+                        temperature = 0.7f  // H5: TODO read from per-conversation settings in v2.1
                     ).collect { event ->
                         when (event.type) {
                             AgentLoop.Event.Type.CONTENT_DELTA -> {

@@ -33,8 +33,8 @@ data class AppSettings(
     val workspaceQuotaMb: Int = 2048,      // max MB for agent's ~/ dir
     val bashCommandTimeoutSec: Int = 30,
     val systemPrompt: String = "",          // empty = use default from AgentLoop
-    val maxToolIterations: Int = 30,        // max tool calls per turn (5-100)
-    val tokenSaveMode: Boolean = false      // if true: no tools, minimal system prompt
+    val maxToolIterations: Int = 50,        // H2: max tool calls per turn (5-100); was 30, too low for build tasks
+    val tokenSaveMode: Boolean = false      // H3: if true, truncate results + skip reasoning (still keeps tools)
 ) {
     enum class ThemeMode { SYSTEM, LIGHT, DARK }
 }
