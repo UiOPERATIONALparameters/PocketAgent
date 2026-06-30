@@ -69,7 +69,7 @@ class BashTool @Inject constructor(
         // Use user-configured timeout as the default; model can override up to it
         val userMaxTimeout = settings.settings.value.bashCommandTimeoutSec
         val requestedTimeout = obj["timeout"]?.jsonPrimitive?.intOrNull ?: userMaxTimeout
-        val timeout = requestedTimeout.coerceIn(1, userMaxTimeout.coerceAtLeast(120))
+        val timeout = requestedTimeout.coerceIn(1, 600)
 
         val result = shell.execute(command, timeoutSec = timeout)
 

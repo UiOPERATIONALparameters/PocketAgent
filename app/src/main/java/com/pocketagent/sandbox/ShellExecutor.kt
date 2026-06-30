@@ -60,7 +60,7 @@ class ShellExecutor @Inject constructor(
 
         val bootstrapPath = bootstrapInstaller.getBashPath()
         val libDir = File(bootstrapInstaller.usrDir, "lib")
-        val termuxExec = File(libDir, "libtermux-exec.so")
+        val termuxExec = findTermuxExec(libDir)
 
         // Verify bootstrap is actually usable
         val canUseBootstrap = bootstrapPath != null &&
@@ -73,7 +73,7 @@ class ShellExecutor @Inject constructor(
         // CRITICAL: Use --login so .profile is loaded (sets PREFIX for apt/pkg)
         val shellCommand: List<String> = if (canUseBootstrap && bootstrapPath != null) {
             // Use bootstrap bash with login flag so .profile is sourced
-            listOf(bootstrapPath, "--login", "-c", command)
+            listOf(bootstrapPath, "--noprofile", "--norc", "-c", "source \"" + workspace.homeDir.absolutePath + "/.profile\" 2>/dev/null\n" + command)
         } else {
             // Fall back to Android's system shell
             listOf("/system/bin/sh", "-c", command)
@@ -103,7 +103,7 @@ class ShellExecutor @Inject constructor(
             // CRITICAL: Set LD_PRELOAD for termux-exec (path translation)
             // This library intercepts file system calls and remaps
             // /data/data/com.termux/ -> our actual paths
-            if (termuxExec.exists()) {
+            if (termuxExec != null && termuxExec.exists()) {
                 env["LD_PRELOAD"] = termuxExec.absolutePath
             }
 
@@ -273,6 +273,12 @@ class ShellExecutor @Inject constructor(
                 truncated = result.first.second || result.second.second
             )
         }
+    }
+
+    private fun findTermuxExec(libDir: File): File? {
+        if (!libDir.exists()) return null
+        val candidates = libDir.listFiles { f -> f.isFile && f.name.startsWith("libtermux-exec") } ?: return null
+        return candidates.minByOrNull { it.name.length }
     }
 
     private fun readStream(stream: java.io.InputStream, maxBytes: Int): Pair<String, Boolean> {
