@@ -34,6 +34,15 @@ import javax.inject.Singleton
  *   - List:      proot-distro list
  *   - Remove:    proot-distro remove debian
  */
+
+/** Metadata for a supported Linux distro. */
+data class DistroInfo(
+    val name: String,
+    val displayName: String,
+    val urlTemplate: String,  // %s = abi
+    val approximateSizeMb: Int
+)
+
 @Singleton
 class ProotDistroManager @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -47,6 +56,33 @@ class ProotDistroManager @Inject constructor(
 
         // Distros that work well on all Android ABIs
         val SUPPORTED_DISTROS = listOf(DISTRO_DEBIAN, DISTRO_UBUNTU, DISTRO_ARCH, DISTRO_ALPINE)
+
+        val DISTRO_INFO = mapOf(
+            DISTRO_DEBIAN to DistroInfo(
+                name = "debian",
+                displayName = "Debian (stable)",
+                urlTemplate = "https://github.com/termux/proot-distro/releases/latest/download/debian-rootfs-%s.tar.xz",
+                approximateSizeMb = 80
+            ),
+            DISTRO_UBUNTU to DistroInfo(
+                name = "ubuntu",
+                displayName = "Ubuntu (22.04 LTS)",
+                urlTemplate = "https://github.com/termux/proot-distro/releases/latest/download/ubuntu-rootfs-%s.tar.xz",
+                approximateSizeMb = 95
+            ),
+            DISTRO_ARCH to DistroInfo(
+                name = "archlinux",
+                displayName = "Arch Linux (rolling)",
+                urlTemplate = "https://github.com/termux/proot-distro/releases/latest/download/archlinux-rootfs-%s.tar.xz",
+                approximateSizeMb = 150
+            ),
+            DISTRO_ALPINE to DistroInfo(
+                name = "alpine",
+                displayName = "Alpine Linux (minimal)",
+                urlTemplate = "https://github.com/termux/proot-distro/releases/latest/download/alpine-rootfs-%s.tar.xz",
+                approximateSizeMb = 30
+            )
+        )
     }
 
     val installRoot: File = File(context.filesDir, "proot-distro")
@@ -267,41 +303,5 @@ class ProotDistroManager @Inject constructor(
 
     private fun escapeShellArg(s: String): String {
         return "'" + s.replace("'", "'\\''") + "'"
-    }
-
-    data class DistroInfo(
-        val name: String,
-        val displayName: String,
-        val urlTemplate: String,  // %s = abi
-        val approximateSizeMb: Int
-    )
-
-    companion object {
-        val DISTRO_INFO = mapOf(
-            DISTRO_DEBIAN to DistroInfo(
-                name = "debian",
-                displayName = "Debian (stable)",
-                urlTemplate = "https://github.com/termux/proot-distro/releases/latest/download/debian-rootfs-%s.tar.xz",
-                approximateSizeMb = 80
-            ),
-            DISTRO_UBUNTU to DistroInfo(
-                name = "ubuntu",
-                displayName = "Ubuntu (22.04 LTS)",
-                urlTemplate = "https://github.com/termux/proot-distro/releases/latest/download/ubuntu-rootfs-%s.tar.xz",
-                approximateSizeMb = 95
-            ),
-            DISTRO_ARCH to DistroInfo(
-                name = "archlinux",
-                displayName = "Arch Linux (rolling)",
-                urlTemplate = "https://github.com/termux/proot-distro/releases/latest/download/archlinux-rootfs-%s.tar.xz",
-                approximateSizeMb = 150
-            ),
-            DISTRO_ALPINE to DistroInfo(
-                name = "alpine",
-                displayName = "Alpine Linux (minimal)",
-                urlTemplate = "https://github.com/termux/proot-distro/releases/latest/download/alpine-rootfs-%s.tar.xz",
-                approximateSizeMb = 30
-            )
-        )
     }
 }

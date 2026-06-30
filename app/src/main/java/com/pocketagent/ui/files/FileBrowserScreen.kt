@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pocketagent.design.PocketType
 import com.pocketagent.design.extendedColors
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -55,6 +56,7 @@ fun FileBrowserScreen(
     val ext = extendedColors()
     val context = androidx.compose.ui.platform.LocalContext.current
     val dateFormat = remember { SimpleDateFormat("MMM d, yyyy HH:mm", Locale.getDefault()) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     Box(
         modifier = Modifier
@@ -240,13 +242,12 @@ fun FileBrowserScreen(
                                 // M20 FIX: Save to Downloads via MediaStore (was using share sheet)
                                 IconButton(onClick = {
                                     val path = entry.path
-                                    val ctx = context
-                                    kotlinx.coroutines.GlobalScope.launch {
-                                        val result = viewModel.saveToDownloads(path, ctx)
+                                    scope.launch {
+                                        val result = viewModel.saveToDownloads(path, context)
                                         if (result != null) {
-                                            Toast.makeText(ctx, "Saved to Downloads: ${entry.name}", Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(context, "Saved to Downloads: ${entry.name}", Toast.LENGTH_SHORT).show()
                                         } else {
-                                            Toast.makeText(ctx, "Failed to save ${entry.name}", Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(context, "Failed to save ${entry.name}", Toast.LENGTH_SHORT).show()
                                         }
                                     }
                                 }) {
