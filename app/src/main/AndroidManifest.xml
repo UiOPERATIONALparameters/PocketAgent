@@ -6,14 +6,19 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- Foreground service for long-running agent tasks (keeps app alive when backgrounded) -->
+    <!-- Foreground service for long-running agent tasks (keeps app alive when backgrounded).
+         Type=dataSync: agent runs tools that may make network calls (web_fetch, web_search, bash w/ curl). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!-- Notifications on Android 13+ (required for foreground service notification) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Keep CPU awake during long agent runs -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
-    <!-- Optional: receive boot completed (not used in v0.1) -->
-    <!-- Optional: file sharing with agent (scoped storage only) -->
+    <!-- Allow installing APKs the agent produces (build APKs goal) -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".PocketAgentApp"
@@ -43,7 +48,8 @@
 
         <service
             android:name=".service.AgentForegroundService"
-            android:exported="false" />
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
