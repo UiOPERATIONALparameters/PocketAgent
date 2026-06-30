@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.IosShare
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
@@ -64,6 +65,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,6 +80,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pocketagent.design.PocketType
 import com.pocketagent.design.extendedColors
 import com.pocketagent.design.softShadow
+import kotlinx.coroutines.launch
 
 @Composable
 fun ChatScreen(
@@ -329,12 +332,13 @@ fun ChatScreen(
 
         // Scroll-to-bottom button when user scrolled up
         if (userScrolledUp) {
+            val scope = rememberCoroutineScope()
             Surface(
                 onClick = {
                     userScrolledUp = false
                     val target = state.messages.size + (if (state.streamingContent.isNotEmpty() || state.streamingToolCalls.isNotEmpty()) 1 else 0) - 1
                     if (target >= 0) {
-                        listState.animateScrollToItem(target.coerceAtLeast(0))
+                        scope.launch { listState.animateScrollToItem(target.coerceAtLeast(0)) }
                     }
                 },
                 color = extendedColors().accent,
