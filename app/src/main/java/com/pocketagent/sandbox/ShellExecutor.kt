@@ -95,8 +95,11 @@ class ShellExecutor @Inject constructor(
             // Tier 1: add system paths
             env["PATH"] = "/system/bin:/system/xbin:${env["PATH"] ?: ""}"
             env["TMPDIR"] = workspace.tmpDir.absolutePath
+        } else {
+            // Tier 2: proot needs LD_LIBRARY_PATH to find libtalloc.so.2
+            env["LD_LIBRARY_PATH"] = linuxEnv.getProotLdLibraryPath()
+            env["TMPDIR"] = workspace.tmpDir.absolutePath
         }
-        // For Tier 2 (proot), the environment is set up inside the container
 
         val process = try {
             pb.start()
