@@ -64,7 +64,8 @@ class WebFetchTool @Inject constructor(
         if (headersObj == null || headersObj["Accept"] == null) {
             reqBuilder.header("Accept", "text/html,application/json,text/plain,*/*")
         }
-        reqBuilder.header("User-Agent", "PocketAgent/0.1 (Android)")
+        // H9 FIX: use BuildConfig.VERSION_NAME instead of hardcoded '0.1'
+        reqBuilder.header("User-Agent", "PocketAgent/${com.pocketagent.BuildConfig.VERSION_NAME} (Android; +https://github.com/UiOPERATIONALparameters/PocketAgent)")
 
         when (method) {
             "GET" -> reqBuilder.get()
@@ -77,9 +78,21 @@ class WebFetchTool @Inject constructor(
 
         try {
             httpClient.newCall(reqBuilder.build()).execute().use { resp ->
-                val respBody = resp.body?.string() ?: ""
-                val truncated = respBody.length > 256_000
-                val capped = if (truncated) respBody.substring(0, 256_000) else respBody
+                // H8 FIX: handle binary content safely. Was: resp.body?.string() which corrupted
+                // binary files (images, APKs, PDFs) by decoding as UTF-8 String.
+                val contentType = resp.header("Content-Type") ?: "unknown"
+                val isBinary = isBinaryContentType(contentType)
+                val bodyBytes = resp.body?.bytes() ?: ByteArray(0)
+                val truncated = bodyBytes.size > 256_000
+                val cappedBytes = if (truncated) bodyBytes.copyOf(256_000) else bodyBytes
+
+                // For binary content, return metadata instead of corrupted text.
+                // The agent should use bash + curl to download binaries to the workspace.
+                val (bodyForOutput, isBinaryNote) = if (isBinary) {
+                    "[Binary content — ${bodyBytes.size} bytes, type: $contentType. Use bash with 'curl -o <path> <url>' to download to workspace.]" to true
+                } else {
+                    String(cappedBytes, Charsets.UTF_8) to false
+                }
 
                 val output = buildJsonObject {
                     put("status", JsonPrimitive(resp.code))
@@ -90,11 +103,13 @@ class WebFetchTool @Inject constructor(
                         }
                     }
                     put("headers", headersJson)
-                    put("body", capped)
+                    put("body", bodyForOutput)
                     put("truncated", JsonPrimitive(truncated))
-                    put("content_type", JsonPrimitive(resp.header("Content-Type") ?: "unknown"))
+                    put("content_type", JsonPrimitive(contentType))
+                    put("is_binary", JsonPrimitive(isBinaryNote))
+                    put("body_bytes", JsonPrimitive(bodyBytes.size))
                 }
-                val display = "${resp.code} ${resp.message} (${respBody.length} bytes) <- $method $url"
+                val display = "${resp.code} ${resp.message} (${bodyBytes.size} bytes${if (isBinary) ", binary" else ""}) <- $method $url"
                 return ToolResult.Success(output, display)
             }
         } catch (e: java.net.MalformedURLException) {
@@ -114,4 +129,21 @@ class WebFetchTool @Inject constructor(
     }
 
     fun toSpec(): ToolSpec = ToolSpec(name, description, parametersSchema)
+}
+
+/** Returns true if the content type is binary (should not be decoded as UTF-8 String). */
+private fun isBinaryContentType(contentType: String): Boolean {
+    val ct = contentType.lowercase()
+    return ct.startsWith("image/") ||
+        ct.startsWith("audio/") ||
+        ct.startsWith("video/") ||
+        ct.startsWith("application/octet-stream") ||
+        ct.contains("pdf") ||
+        ct.contains("zip") ||
+        ct.contains("gzip") ||
+        ct.contains("tar") ||
+        ct.contains("exe") ||
+        ct.contains("apk") ||
+        ct.contains("jar") ||
+        ct.contains("dex")
 }

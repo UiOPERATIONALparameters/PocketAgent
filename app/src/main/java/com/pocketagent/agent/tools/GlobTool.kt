@@ -9,6 +9,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import java.nio.file.FileSystems
+import java.nio.file.PathMatcher
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -19,7 +21,9 @@ class GlobTool @Inject constructor(
 
     override val name = "glob"
     override val description = """
-        Find files matching a pattern (e.g. **/*.kt, *.py). Returns paths sorted by modification time. Caps at 100.
+        Find files matching a glob pattern. Returns paths sorted by modification time (newest first). Caps at 100.
+        Supports: ** (recursive), * (any non-slash), ? (single char), [abc] (char class), {a,b} (alternation).
+        Examples: **/*.kt, src/**/*.py, *.md, {test,spec}/*.js
     """.trimIndent()
 
     override val parametersSchema = """
@@ -34,16 +38,33 @@ class GlobTool @Inject constructor(
         val searchDir = try { workspace.resolve(pathStr) } catch (e: SecurityException) { return ToolResult.Error(e.message ?: "Invalid path") }
         if (!searchDir.exists()) return ToolResult.Error("Path not found: $pathStr")
 
-        val regexPattern = pattern.replace(".", "\\.").replace("**/", "(.*/)?").replace("**", ".*").replace("*", "[^/]*").replace("?", ".")
-        val regex = try { Regex("^$regexPattern$") } catch (e: Exception) { return ToolResult.Error("Invalid pattern: ${e.message}") }
+        // C2 FIX: Use JDK PathMatcher instead of broken chained regex replacements.
+        // The old code did .replace("**", ".*").replace("*", "[^/]*") which corrupted
+        // the .* produced by the first replacement into .[^/]* — broken for ** patterns.
+        val matcher: PathMatcher = try {
+            FileSystems.getDefault().getPathMatcher("glob:$pattern")
+        } catch (e: Exception) {
+            return ToolResult.Error("Invalid pattern: ${e.message}")
+        }
 
         val maxResults = 100
         val results = searchDir.walkTopDown()
             .filter { it.isFile }
-            .filter { f -> val relPath = searchDir.toPath().relativize(f.toPath()).toString(); regex.matches(relPath) || regex.matches(f.name) }
+            .filter { f ->
+                val relPath = searchDir.toPath().relativize(f.toPath())
+                // Match against the relative path (so ** works) AND the file name (so *.kt works)
+                matcher.matches(relPath) || matcher.matches(relPath.fileName) || matcher.matches(f.toPath().fileName)
+            }
             .sortedByDescending { it.lastModified() }
             .take(maxResults)
-            .map { f -> val relPath = workspace.homeDir.toPath().relativize(f.toPath()).toString(); JsonObject(mapOf("path" to JsonPrimitive(relPath), "size" to JsonPrimitive(f.length()), "modified" to JsonPrimitive(f.lastModified()))) }
+            .map { f ->
+                val relPath = workspace.homeDir.toPath().relativize(f.toPath()).toString()
+                JsonObject(mapOf(
+                    "path" to JsonPrimitive(relPath),
+                    "size" to JsonPrimitive(f.length()),
+                    "modified" to JsonPrimitive(f.lastModified())
+                ))
+            }
             .toList()
 
         val output = buildJsonObject {

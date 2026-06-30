@@ -4,7 +4,6 @@ import androidx.compose.ui.graphics.Color
 
 /**
  * Color tokens extracted directly from Kimi's live DOM via headless browser inspection.
- * Source: /home/z/my-project/research/KIMI_UI_RESEARCH.md
  *
  * Key insights:
  * - Background is off-white #F9FBFC, not pure white. This is THE iOS-clean signature.

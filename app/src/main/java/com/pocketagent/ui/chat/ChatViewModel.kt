@@ -317,7 +317,8 @@ class ChatViewModel @Inject constructor(
                         messages = history,
                         systemPrompt = settings.settings.value.systemPrompt.ifBlank { AgentLoop.DEFAULT_SYSTEM_PROMPT },
                         maxIterations = settings.settings.value.maxToolIterations,
-                        tokenSaveMode = settings.settings.value.tokenSaveMode
+                        tokenSaveMode = settings.settings.value.tokenSaveMode,
+                        temperature = 0.7f  // H5: TODO read from per-conversation settings in v2.1
                     ).collect { event ->
                         when (event.type) {
                             AgentLoop.Event.Type.CONTENT_DELTA -> {
@@ -518,8 +519,12 @@ class ChatViewModel @Inject constructor(
     private fun startAgentService(statusText: String) {
         try {
             val intent = android.content.Intent(appContext, com.pocketagent.service.AgentForegroundService::class.java)
-            intent.putExtra("status_text", statusText)
-            appContext.startService(intent)
+            intent.putExtra(com.pocketagent.service.AgentForegroundService.EXTRA_STATUS_TEXT, statusText)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                appContext.startForegroundService(intent)
+            } else {
+                appContext.startService(intent)
+            }
         } catch (_: Exception) {
             // Foreground service might fail on some devices — not critical
         }

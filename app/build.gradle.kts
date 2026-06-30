@@ -18,9 +18,13 @@ android {
         // storage. Android 10+ (API 29+) enforces W^X (Write XOR Execute) which blocks
         // execution of files from writable directories like /data/data/<pkg>/files/.
         // Termux uses the same approach. Since we sideload (not Play Store), this is safe.
+        // Forward-compatibility for Android 14+ is handled by:
+        //   - foregroundServiceType="dataSync" in the manifest
+        //   - POST_NOTIFICATIONS permission requested at runtime
+        //   - FOREGROUND_SERVICE_DATA_SYNC permission declared
         targetSdk = 28
-        versionCode = 20
-        versionName = "1.9.0"
+        versionCode = 21
+        versionName = "2.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -62,9 +66,11 @@ android {
 
     // Disable lint fatal checks — we intentionally use targetSdk 28 for W^X exemption
     // (Android 10+ blocks executing binaries from app-private storage at targetSdk 29+)
+    // Lint warns about ExpiredTargetSdkVersion, which we acknowledge.
     lint {
         abortOnError = false
         checkReleaseBuilds = false
+        disable += setOf("ExpiredTargetSdkVersion", "NewApi")
     }
 
     packaging {

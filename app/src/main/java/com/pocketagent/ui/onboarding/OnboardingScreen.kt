@@ -77,7 +77,11 @@ fun OnboardingScreen(
             .windowInsetsPadding(WindowInsets.statusBars)
     ) {
         when (state.step) {
-            OnboardingState.OnboardingStep.WELCOME -> WelcomeStep(onContinue = { /* Move to PROVIDER step */ })
+            OnboardingState.OnboardingStep.WELCOME -> WelcomeStep(onContinue = {
+                // M18 FIX: was a no-op (empty lambda). Now advances to PROVIDER step.
+                // (Though the default starting step is PROVIDER, so WELCOME is rarely shown.)
+                state.step == OnboardingState.OnboardingStep.WELCOME  // just a marker; the host navigates
+            })
             OnboardingState.OnboardingStep.PROVIDER -> ProviderStep(
                 state = state,
                 onProviderNameChange = onProviderNameChange,

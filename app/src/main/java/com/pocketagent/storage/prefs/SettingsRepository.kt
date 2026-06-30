@@ -100,12 +100,33 @@ class SettingsRepository @Inject constructor(
 
     /**
      * Force reload from disk. Use sparingly — only when you know external changes happened.
+     * H16 FIX: moved load() inside the lock to prevent race condition.
      */
     suspend fun forceReload() = withContext(Dispatchers.IO) {
         loadMutex.withLock {
             loaded = false
+            // H16 FIX: load() is now called INSIDE the lock.
+            // Was: lock { loaded = false } then load() outside lock — race condition.
+            val providerJson = prefs.getString(KEY_PROVIDERS, null)
+            val providers = if (providerJson != null) {
+                try {
+                    json.decodeFromString(
+                        kotlinx.serialization.builtins.ListSerializer(ProviderConfig.serializer()),
+                        providerJson
+                    )
+                } catch (e: Exception) { emptyList() }
+            } else emptyList()
+            _providers.value = providers
+
+            val settingsJson = prefs.getString(KEY_SETTINGS, null)
+            val settings = if (settingsJson != null) {
+                try {
+                    json.decodeFromString(AppSettings.serializer(), settingsJson)
+                } catch (e: Exception) { AppSettings() }
+            } else AppSettings()
+            _settings.value = settings
+            loaded = true
         }
-        load()
     }
 
     suspend fun saveProvider(config: ProviderConfig) = withContext(Dispatchers.IO) {

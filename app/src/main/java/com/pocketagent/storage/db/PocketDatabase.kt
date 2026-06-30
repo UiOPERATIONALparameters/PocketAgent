@@ -9,7 +9,7 @@ import androidx.room.RoomDatabase
         MessageEntity::class,
         ToolRunEntity::class
     ],
-    version = 1,
+    version = 2,  // H17: bumped from 1 to 2 with proper migration (was fallbackToDestructiveMigration)
     exportSchema = true
 )
 abstract class PocketDatabase : RoomDatabase() {

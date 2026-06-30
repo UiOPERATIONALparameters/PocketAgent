@@ -80,8 +80,12 @@ class FileReadTool @Inject constructor(
         }
 
         val truncated = raw.size > maxBytes
+        // H15 FIX: walk back to the previous UTF-8 boundary before creating the String.
+        // Was: String(raw, 0, maxBytes, UTF_8) — could split multi-byte chars mid-character,
+        // producing ? replacement chars or throwing on some JVMs.
         val text = if (truncated) {
-            String(raw, 0, maxBytes, Charsets.UTF_8)
+            val safeEnd = findUtf8Boundary(raw, maxBytes)
+            String(raw, 0, safeEnd, Charsets.UTF_8)
         } else {
             String(raw, Charsets.UTF_8)
         }
@@ -109,7 +113,8 @@ class FileReadTool @Inject constructor(
 
 @Singleton
 class FileWriteTool @Inject constructor(
-    private val workspace: Workspace
+    private val workspace: Workspace,
+    private val settings: com.pocketagent.storage.prefs.SettingsRepository
 ) : AgentTool {
 
     override val name = "file_write"
@@ -147,7 +152,8 @@ class FileWriteTool @Inject constructor(
             ?: return ToolResult.Error("Missing 'path' parameter")
         val content = obj["content"]?.jsonPrimitive?.content
             ?: return ToolResult.Error("Missing 'content' parameter")
-        val append = obj["append"]?.jsonPrimitive?.contentOrNull == "true"
+        // H14 FIX: explicit case-insensitive boolean parsing
+        val append = obj["append"]?.jsonPrimitive?.contentOrNull?.equals("true", ignoreCase = true) == true
 
         val file = try {
             workspace.resolve(pathStr)
@@ -155,10 +161,11 @@ class FileWriteTool @Inject constructor(
             return ToolResult.Error(e.message ?: "Invalid path")
         }
 
-        // Quota check (2GB default)
+        // M13 FIX: read quota from user's settings (was hardcoded 2048MB).
+        val quotaMb = settings.settings.value.workspaceQuotaMb
         val projectedBytes = (if (append) file.length() + content.toByteArray().size else content.toByteArray().size).toLong()
-        if (workspace.wouldExceedQuota(projectedBytes, 2048)) {
-            return ToolResult.Error("Workspace quota exceeded")
+        if (workspace.wouldExceedQuota(projectedBytes, quotaMb)) {
+            return ToolResult.Error("Workspace quota exceeded (${quotaMb}MB). Delete files in the Files browser or raise the quota in Settings.")
         }
 
         try {
@@ -232,8 +239,11 @@ class FileListTool @Inject constructor(
         } else {
             (dir.listFiles()?.toList() ?: emptyList()).asSequence()
         }
-        val limited = walk.take(500).toList()  // hard cap
-        var truncated = false
+        // C1 FIX: consume the sequence ONCE. Was: take(500).toList() then take(501).count()
+        // (Kotlin Sequence is single-use; second call returned 0, so truncated was always false)
+        val allFiles = walk.take(501).toList()  // 1 extra to detect truncation
+        val limited = allFiles.take(500)
+        val truncated = allFiles.size > 500
         for (f in limited) {
             val rel = dir.toPath().relativize(f.toPath()).toString()
             if (rel.isEmpty()) continue
@@ -244,7 +254,6 @@ class FileListTool @Inject constructor(
                 put("modified", JsonPrimitive(f.lastModified()))
             })
         }
-        truncated = walk.take(501).count() > 500
 
         val output = buildJsonObject {
             put("path", pathStr)
@@ -258,4 +267,26 @@ class FileListTool @Inject constructor(
     }
 
     fun toSpec(): ToolSpec = ToolSpec(name, description, parametersSchema)
+}
+
+/**
+ * Find the largest offset <= maxBytes that ends on a UTF-8 character boundary.
+ * UTF-8 continuation bytes have the bit pattern 10xxxxxx (0x80-0xBF).
+ * Walk back from maxBytes until we find a byte that is NOT a continuation byte.
+ * Used by FileReadTool to avoid splitting multi-byte characters on truncation (H15).
+ */
+private fun findUtf8Boundary(bytes: ByteArray, maxBytes: Int): Int {
+    if (maxBytes >= bytes.size) return bytes.size
+    var i = maxBytes
+    while (i > 0) {
+        val b = bytes[i - 1].toInt() and 0xFF
+        // If this byte is a continuation byte (0x80-0xBF), it's mid-character — keep walking back
+        if (b and 0xC0 == 0x80) {
+            i--
+        } else {
+            // This is a leading byte (or ASCII); i is now a valid boundary
+            break
+        }
+    }
+    return i
 }

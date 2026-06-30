@@ -20,8 +20,7 @@ import javax.inject.Singleton
  * Mirrors Anthropic's Claude Computer Use bash tool schema so any model
  * trained on that spec works zero-shot.
  *
- * Verified working with GLM 5.2 via user's gateway — see
- * /home/z/my-project/scripts/test_gateway_full.sh
+ * Verified working with GLM 5.2 via standard OpenAI-compatible gateways.
  */
 @Singleton
 class BashTool @Inject constructor(
@@ -102,7 +101,10 @@ class BashTool @Inject constructor(
         return if (result.isSuccess) {
             ToolResult.Success(output, display)
         } else {
-            // Even on failure, return Success with the output — the LLM needs to see the error to recover
+            // C3 FIX: Even on failure, return Success with the output (the LLM needs to see
+            // the error in stderr to recover). But we differentiate the DISPLAY — the UI
+            // shows a red 'failed' chip when exit_code != 0. The JSON output's exit_code
+            // field is the source of truth for the LLM.
             ToolResult.Success(output, display)
         }
     }

@@ -175,17 +175,79 @@ class FileBrowserViewModel @Inject constructor(
     }
 
     /**
-     * Download/share a file from the workspace to the user's phone.
-     * Uses Android's share sheet so the user can save to Downloads,
-     * send via email, etc.
+     * M20 FIX: save a file from the workspace to the user's Downloads directory.
+     * Uses MediaStore on Android 10+ (no permission needed for Downloads);
+     * falls back to writing to the public Downloads dir on Android 9 and below.
+     *
+     * Returns the URI of the saved file on success, null on failure.
      */
-    fun downloadFile(relativePath: String): String? {
-        return try {
-            val file = workspace.resolve(relativePath)
-            if (!file.exists() || !file.isFile) return null
-            file.absolutePath
-        } catch (_: Exception) {
-            null
+    suspend fun saveToDownloads(relativePath: String, context: android.content.Context): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val file = workspace.resolve(relativePath)
+                if (!file.exists() || !file.isFile) return@withContext null
+
+                val fileName = file.name
+                val mimeType = guessMimeType(fileName)
+
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    // Android 10+ — use MediaStore.Downloads (no permission needed)
+                    val resolver = context.contentResolver
+                    val values = android.content.ContentValues().apply {
+                        put(android.provider.MediaStore.Downloads.DISPLAY_NAME, fileName)
+                        put(android.provider.MediaStore.Downloads.MIME_TYPE, mimeType)
+                        put(android.provider.MediaStore.Downloads.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS)
+                    }
+                    val collection = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                    val uri = resolver.insert(collection, values) ?: return@withContext null
+                    resolver.openOutputStream(uri)?.use { output ->
+                        file.inputStream().use { input -> input.copyTo(output) }
+                    }
+                    uri.toString()
+                } else {
+                    // Android 9 and below — write directly to public Downloads
+                    val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(
+                        android.os.Environment.DIRECTORY_DOWNLOADS
+                    )
+                    if (!downloadsDir.exists()) downloadsDir.mkdirs()
+                    val dest = java.io.File(downloadsDir, fileName)
+                    file.inputStream().use { input ->
+                        java.io.FileOutputStream(dest).use { output -> input.copyTo(output) }
+                    }
+                    dest.absolutePath
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
+    private fun guessMimeType(fileName: String): String {
+        val ext = fileName.substringAfterLast('.', "").lowercase()
+        return when (ext) {
+            "txt", "md" -> "text/plain"
+            "html", "htm" -> "text/html"
+            "css" -> "text/css"
+            "js" -> "text/javascript"
+            "json" -> "application/json"
+            "xml" -> "application/xml"
+            "py" -> "text/x-python"
+            "kt", "java" -> "text/x-java-source"
+            "c", "cpp", "h" -> "text/x-c"
+            "png" -> "image/png"
+            "jpg", "jpeg" -> "image/jpeg"
+            "gif" -> "image/gif"
+            "webp" -> "image/webp"
+            "svg" -> "image/svg+xml"
+            "pdf" -> "application/pdf"
+            "zip" -> "application/zip"
+            "gz", "tgz" -> "application/gzip"
+            "tar" -> "application/x-tar"
+            "apk" -> "application/vnd.android.package-archive"
+            "mp3" -> "audio/mpeg"
+            "mp4" -> "video/mp4"
+            "wav" -> "audio/wav"
+            else -> "application/octet-stream"
         }
     }
 

@@ -80,10 +80,9 @@ class WebSearchTool @Inject constructor(
                     val html = response.body?.string() ?: ""
                     val results = parseDuckDuckGoHtml(html, numResults)
 
-                    if (results.isEmpty()) {
-                        return@withContext ToolResult.Error("No results found for: $query")
-                    }
-
+                    // H11 FIX: 'No results' is a valid response, NOT an error.
+                    // Was: return ToolResult.Error("No results found") — this confused the LLM
+                    // into retrying with different queries, wasting tokens.
                     val output = buildJsonObject {
                         put("query", query)
                         put("result_count", JsonPrimitive(results.size))
@@ -98,9 +97,13 @@ class WebSearchTool @Inject constructor(
                         }
                     }
 
-                    val display = results.mapIndexed { idx, r ->
-                        "${idx + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}\n"
-                    }.joinToString("\n")
+                    val display = if (results.isEmpty()) {
+                        "No results found for: $query"
+                    } else {
+                        results.mapIndexed { idx, r ->
+                            "${idx + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}\n"
+                        }.joinToString("\n")
+                    }
 
                     ToolResult.Success(output, display)
                 }

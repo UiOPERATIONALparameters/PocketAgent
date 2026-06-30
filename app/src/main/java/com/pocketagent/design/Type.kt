@@ -50,26 +50,27 @@ object PocketType {
         lineHeight = 20.sp
     )
 
-    // Body (Kimi's signature 14px body)
+    // Body — M22 FIX: bumped from 14sp to 16sp for accessibility (WCAG recommends >= 16sp).
+    // iOS body is 17pt, ChatGPT uses 16sp. The previous 14sp was too small for visually impaired users.
     val Body = TextStyle(
         fontFamily = Family,
         fontWeight = FontWeight.Normal,
-        fontSize = 14.sp,
-        lineHeight = 20.sp
+        fontSize = 16.sp,
+        lineHeight = 22.sp
     )
 
     val BodyMedium = TextStyle(
         fontFamily = Family,
         fontWeight = FontWeight.Medium,
-        fontSize = 14.sp,
-        lineHeight = 20.sp
+        fontSize = 16.sp,
+        lineHeight = 22.sp
     )
 
     val BodySmall = TextStyle(
         fontFamily = Family,
         fontWeight = FontWeight.Normal,
-        fontSize = 13.sp,
-        lineHeight = 18.sp
+        fontSize = 14.sp,
+        lineHeight = 19.sp
     )
 
     val Label = TextStyle(

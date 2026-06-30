@@ -16,15 +16,25 @@ import dagger.hilt.android.AndroidEntryPoint
  * Foreground service that keeps the agent running when the app is backgrounded.
  * Shows a persistent notification while the agent is active.
  *
- * The agent loop itself is driven by the ChatViewModel; this service just
- * keeps the process alive while long-running tool calls complete.
+ * v2.0 changes:
+ *  - foregroundServiceType=dataSync declared in manifest (Android 14+ requirement)
+ *  - M14 FIX: notification text now comes from the intent's STATUS_TEXT extra
+ *    (was hardcoded "Agent working…" — the intent extra was being ignored)
  */
 @AndroidEntryPoint
 class AgentForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NotificationIds.AGENT_FOREGROUND, buildNotification("Agent working…"))
+        // M14 FIX: use the status text from the intent (passed by ChatViewModel)
+        val statusText = intent?.getStringExtra(EXTRA_STATUS_TEXT) ?: "Agent working…"
+        startForeground(NotificationIds.AGENT_FOREGROUND, buildNotification(statusText))
         return START_NOT_STICKY
+    }
+
+    /** Update the notification text without restarting the service. */
+    fun updateStatus(statusText: String) {
+        val nm = getSystemService(android.app.NotificationManager::class.java)
+        nm.notify(NotificationIds.AGENT_FOREGROUND, buildNotification(statusText))
     }
 
     override fun onBind(intent: Intent?): android.os.IBinder? = null
@@ -48,5 +58,9 @@ class AgentForegroundService : Service() {
             .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
+    }
+
+    companion object {
+        const val EXTRA_STATUS_TEXT = "status_text"
     }
 }

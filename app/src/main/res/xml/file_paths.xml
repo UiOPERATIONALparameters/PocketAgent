@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
+    <!-- Workspace files (agent's downloads) -->
     <files-path name="workspace" path="workspace/" />
-    <files-path name="usr" path="usr/" />
-    <files-path name="root" path="." />
+    <!-- Bootstrap root (for diagnostic exports) -->
+    <files-path name="files" path="." />
 </paths>
