@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://x.com/PrajwalTomar_/status/2060036685145227420",
+    "name": "BRO this is CRAZY. Claude Design just collapsed the entire website",
+    "snippet": "Claude Design just collapsed the entire website design process into 10 minutes. Rough idea to fully responsive, agency-tier UI in a single ...",
+    "host_name": "x.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/ClaudeCode/comments/1tywuko/claude_code_should_collapse_the_tool_calls_and",
+    "name": "Claude Code should \"collapse\" the tool calls and thinking  - Reddit",
+    "snippet": "In regular Claude, it often collapses it's tool calls as it does it's task/thinking but you can click on it later to check it out if you're ...",
+    "host_name": "www.reddit.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://arxiv.org/html/2604.14228v1",
+    "name": "Dive into Claude Code: The Design Space of Today's and Future AI",
+    "snippet": "Abstract. Claude Code is an agentic coding tool that can run shell commands, edit files, and call external services on behalf of the user.",
+    "host_name": "arxiv.org",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/anthropics/claude-code/issues/49646",
+    "name": "[FEATURE] VSCode extension: configurable tool call visibility (hide",
+    "snippet": "When using the Claude Code VSCode extension, every Grep, Bash, Read, etc. call appears inline in the chat as a full expanded entry. For power ...\nc) Group similar/consecutive calls — When Claude runs 4 Grep calls in a row, collapse them into a single grouped entry (e.g. 4 searches) rather ...",
+    "host_name": "github.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.linkedin.com/posts/markshust_claude-code-is-more-than-just-a-code-monkey-activity-7387096205706772480-Jxou",
+    "name": "Claude Code is more than just a code monkey machine. | Mark Shust",
+    "snippet": "Claude Code is more than just a code monkey machine. It can also output really neat viz mockups. When commanding the prompt, ...",
+    "host_name": "www.linkedin.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

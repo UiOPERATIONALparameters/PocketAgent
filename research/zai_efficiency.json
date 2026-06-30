@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://z.ai/blog/glm-4.5",
+    "name": "GLM-4.5: Reasoning, Coding, and Agentic Abililties - Z.ai",
+    "snippet": "Notably, GLM-4.5 achieves the highest average tool calling success rate at 90.6%, outperforming Claude-4-Sonnet (89.5%), Kimi-K2 (86.2 ...\nGLM-4.5 is a foundation model optimized for agentic tasks. It provides 128k context length and native function calling capacity. We measure its ...\nNotably, GLM-4.5 achieves the highest average tool calling success rate at 90.6%, outperforming Claude-4-Sonnet (89.5%), Kimi-K2 (86.2%), and ...",
+    "host_name": "z.ai",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=UyL8GDK4dn0",
+    "name": "Function calling vs agents: Choose the right AI approach (DEV204)",
+    "snippet": "AWS re:Invent 2025 - Function calling vs agents: Choose the right AI approach (DEV204). 341 views · 6 months ago. #AWS #AWSreInvent2025 # ...",
+    "host_name": "www.youtube.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents",
+    "name": "Effective context engineering for AI agents - Anthropic",
+    "snippet": "Because tools define the contract between agents and their information/action space, it's extremely important that tools promote efficiency, ...",
+    "host_name": "www.anthropic.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/LocalLLaMA/comments/1jd8lwp/whats_the_smallest_most_effective_model_for",
+    "name": "What's the smallest, most effective model for function calling and AI",
+    "snippet": "I'm looking for a compact, highly efficient model that performs well on function calling. For now I'm thinking <= 4b parameters (do you consider that small?)",
+    "host_name": "www.reddit.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://openai.com/index/new-tools-for-building-agents",
+    "name": "New tools for building agents | OpenAI",
+    "snippet": "With a single Responses API call, developers will be able to solve increasingly complex tasks using multiple tools and model turns.",
+    "host_name": "openai.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

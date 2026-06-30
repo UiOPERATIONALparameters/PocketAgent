@@ -1,0 +1,29 @@
+[
+  {
+    "url": "https://www.anthropic.com/engineering/writing-tools-for-agents",
+    "name": "Writing effective tools for AI agents—using AI agents - Anthropic",
+    "snippet": "By selectively implementing tools whose names reflect natural subdivisions of tasks, you simultaneously reduce the number of tools and tool ...",
+    "host_name": "www.anthropic.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents",
+    "name": "Effective context engineering for AI agents - Anthropic",
+    "snippet": "In Writing tools for AI agents – with AI agents, we discussed building tools that are well understood by LLMs and have minimal overlap in ...",
+    "host_name": "www.anthropic.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.anthropic.com/research/building-effective-agents",
+    "name": "Building Effective AI Agents - Anthropic",
+    "snippet": "In this post, we share what we've learned from working with our customers and building agents ourselves, and give practical advice for developers on building ...",
+    "host_name": "www.anthropic.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  }
+]

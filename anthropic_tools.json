@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://www.anthropic.com/engineering/writing-tools-for-agents",
+    "name": "Writing effective tools for AI agents—using AI agents - Anthropic",
+    "snippet": "By selectively implementing tools whose names reflect natural subdivisions of tasks, you simultaneously reduce the number of tools and tool ...",
+    "host_name": "www.anthropic.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/LLMDevs/comments/1nfg54u/how_to_write_effective_tools_for_agents_from",
+    "name": "How to write effective tools for agents [ from Anthropic ] : r/LLMDevs",
+    "snippet": "When writing tool descriptions and specs, think of how you would describe your tool to a new hire on your team. Clear, explicit specs ...\nA summary of what Anthropic wrote about in their latest resource on how to write effective tools with your agents using agents.",
+    "host_name": "www.reddit.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.linkedin.com/posts/anthropicresearch_writing-effective-tools-for-ai-agentsusing-activity-7372002018103734272-YHWQ",
+    "name": "How to write effective tools for LLM agents | Anthropic posted on the",
+    "snippet": "New on the Anthropic Engineering blog: writing effective tools for LLM agents. AI agents are only as powerful as the tools we give them.",
+    "host_name": "www.linkedin.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://techwithibrahim.medium.com/writing-effective-tools-for-ai-agents-production-lessons-from-anthropic-99ea76a7fcf0",
+    "name": "Writing Effective Tools for AI Agents: Production Lessons from",
+    "snippet": "Tool descriptions are prompts. Every word in your tool's name, description, and parameter documentation shapes how agents understand and use it.\nAnthropic's Applied AI team recently published hard-won lessons from building tools for agents like Claude Code. Their insight? Tools represent ...",
+    "host_name": "techwithibrahim.medium.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://composio.dev/blog/how-to-build-tools-for-ai-agents-a-field-guide",
+    "name": "How to build great tools for AI agents: A field guide | Composio",
+    "snippet": "An effective tool has a clear, atomic purpose, consistent naming, well-defined parameters and concise descriptions. When you reduce ambiguity ...\nThis blog takes you deep in the rabbit hole of agent tools and how to improve them for production use cases.",
+    "host_name": "composio.dev",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

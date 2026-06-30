@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents",
+    "name": "Effective context engineering for AI agents - Anthropic",
+    "snippet": "It's best to start by testing a minimal prompt with the best model available to see how it performs on your task, and then add clear ...",
+    "host_name": "www.anthropic.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.anthropic.com/engineering/writing-tools-for-agents",
+    "name": "Writing effective tools for AI agents—using AI agents - Anthropic",
+    "snippet": "The Model Context Protocol (MCP) can empower LLM agents with potentially hundreds of tools to solve real-world tasks.",
+    "host_name": "www.anthropic.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.linkedin.com/posts/richmondalake_effective-context-engineering-for-ai-agents-activity-7386881837643603968-R-6K",
+    "name": "Anthropic's Effective Context Engineering: A Deep Dive",
+    "snippet": "Step-by-step agent architecture, use cases, and deployment strategies. Agent architecture | Use cases | Best practices Guide → https ...",
+    "host_name": "www.linkedin.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://platform.claude.com/cookbook/tool-use-context-engineering-context-engineering-tools",
+    "name": "Context engineering: memory, compaction, and tool clearing",
+    "snippet": "Compare context engineering strategies for long-running agents and learn when each applies, what it costs, and how they compose.",
+    "host_name": "platform.claude.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://medium.com/data-science-collective/context-engineering-for-ai-agents-complete-course-fd509e276a9e",
+    "name": "Context Engineering for AI Agents: Complete Course | by Marina Wyss",
+    "snippet": "Claude Code is Anthropic's CLI-based coding agent (obviously), and it's one of the best-documented examples of context engineering in practice.",
+    "host_name": "medium.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]
