@@ -672,7 +672,7 @@ private fun ToolCallCard(
 
     Surface(
         color = ext.toolCardBg,
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(8.dp),
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
             ext.toolCardBorder
@@ -681,7 +681,7 @@ private fun ToolCallCard(
             .fillMaxWidth()
             .clickable(onClick = { expanded = !expanded })
     ) {
-        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = summary,

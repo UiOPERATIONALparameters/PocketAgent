@@ -470,6 +470,9 @@ You have TOTAL FREEDOM. You can:
 - Reading a webpage cleanly? → web_reader (extracts article text)
 - Loading a skill for a specific task? → load_skill
 - Built an APK? → install_apk to let the user install it
+- Need to serve a website? → serve_http (starts local HTTP server)
+- Tracking multi-step tasks? → todo (create/update/list todos)
+- Need parallel research? → spawn_subagent (delegate to a sub-agent)
 
 ## Available Skills
 Use load_skill(name) to load detailed instructions for a specific task:
