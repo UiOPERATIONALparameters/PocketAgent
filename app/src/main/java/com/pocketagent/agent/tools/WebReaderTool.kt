@@ -115,7 +115,7 @@ class WebReaderTool @Inject constructor(
 
     /** Extract the <title> from HTML. */
     private fun extractTitle(html: String): String {
-        val titleRegex = Regex("<title[^>]*>(.*?)</title>", RegexOption.DOT_MATCHES_ALL or RegexOption.IGNORE_CASE)
+        val titleRegex = Regex("<title[^>]*>(.*?)</title>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
         val match = titleRegex.find(html)
         return match?.groupValues?.get(1)
             ?.replace(Regex("<[^>]+>"), "")
@@ -136,27 +136,27 @@ class WebReaderTool @Inject constructor(
         var text = html
 
         // Remove everything before <body> if present
-        val bodyMatch = Regex("<body[^>]*>(.*)</body>", RegexOption.DOT_MATCHES_ALL and RegexOption.IGNORE_CASE).find(text)
+        val bodyMatch = Regex("<body[^>]*>(.*)</body>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)).find(text)
         if (bodyMatch != null) {
             text = bodyMatch.groupValues[1]
         }
 
         // Remove script and style blocks
-        text = text.replace(Regex("<script[^>]*>.*?</script>", RegexOption.DOT_MATCHES_ALL and RegexOption.IGNORE_CASE), "")
-        text = text.replace(Regex("<style[^>]*>.*?</style>", RegexOption.DOT_MATCHES_ALL and RegexOption.IGNORE_CASE), "")
-        text = text.replace(Regex("<nav[^>]*>.*?</nav>", RegexOption.DOT_MATCHES_ALL and RegexOption.IGNORE_CASE), "")
-        text = text.replace(Regex("<header[^>]*>.*?</header>", RegexOption.DOT_MATCHES_ALL and RegexOption.IGNORE_CASE), "")
-        text = text.replace(Regex("<footer[^>]*>.*?</footer>", RegexOption.DOT_MATCHES_ALL and RegexOption.IGNORE_CASE), "")
-        text = text.replace(Regex("<aside[^>]*>.*?</aside>", RegexOption.DOT_MATCHES_ALL and RegexOption.IGNORE_CASE), "")
-        text = text.replace(Regex("<noscript[^>]*>.*?</noscript>", RegexOption.DOT_MATCHES_ALL and RegexOption.IGNORE_CASE), "")
+        text = text.replace(Regex("<script[^>]*>.*?</script>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)), "")
+        text = text.replace(Regex("<style[^>]*>.*?</style>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)), "")
+        text = text.replace(Regex("<nav[^>]*>.*?</nav>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)), "")
+        text = text.replace(Regex("<header[^>]*>.*?</header>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)), "")
+        text = text.replace(Regex("<footer[^>]*>.*?</footer>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)), "")
+        text = text.replace(Regex("<aside[^>]*>.*?</aside>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)), "")
+        text = text.replace(Regex("<noscript[^>]*>.*?</noscript>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)), "")
         text = text.replace(Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL), "")
 
         // Try to find <article> or <main> content
-        val articleMatch = Regex("<article[^>]*>(.*?)</article>", RegexOption.DOT_MATCHES_ALL and RegexOption.IGNORE_CASE).find(text)
+        val articleMatch = Regex("<article[^>]*>(.*?)</article>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)).find(text)
         if (articleMatch != null) {
             text = articleMatch.groupValues[1]
         } else {
-            val mainMatch = Regex("<main[^>]*>(.*?)</main>", RegexOption.DOT_MATCHES_ALL and RegexOption.IGNORE_CASE).find(text)
+            val mainMatch = Regex("<main[^>]*>(.*?)</main>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)).find(text)
             if (mainMatch != null) {
                 text = mainMatch.groupValues[1]
             }

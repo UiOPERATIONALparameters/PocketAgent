@@ -96,8 +96,7 @@ class ShellExecutor @Inject constructor(
             env["PATH"] = "/system/bin:/system/xbin:${env["PATH"] ?: ""}"
             env["TMPDIR"] = workspace.tmpDir.absolutePath
         } else {
-            // Tier 2: proot needs LD_LIBRARY_PATH to find libtalloc.so.2
-            env["LD_LIBRARY_PATH"] = linuxEnv.getProotLdLibraryPath()
+            // Tier 2: proot is statically linked — no LD_LIBRARY_PATH needed
             env["TMPDIR"] = workspace.tmpDir.absolutePath
         }
 
