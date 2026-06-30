@@ -14,29 +14,36 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Spawns a bash/sh process to execute commands in the agent's workspace.
+ * v2.1 Shell Executor — radically simpler than v2.0.
  *
- * CRITICAL ANDROID LINKER FIX:
- * Android's dynamic linker (linker64) is the SYSTEM linker at /system/bin/linker64.
- * When you spawn a binary from app-private storage (like our Termux bootstrap bash),
- * the system linker doesn't know about usr/lib/ — it only searches system library paths.
- * Setting LD_LIBRARY_PATH in the environment doesn't reliably work on all Android versions
- * because the linker reads it at a specific point in its initialization.
+ * Two-tier execution:
  *
- * The reliable solution (used by Termux): invoke the binary THROUGH the dynamic linker
- * with an explicit --library-path argument. This forces the linker to search our lib dir.
+ * Tier 1 (Lite — always available, no setup):
+ *   - Uses Android's /system/bin/sh (mksh)
+ *   - Has: ls, cat, echo, grep, sed, awk, head, tail, wc, sort, uniq, tr, cut, mkdir, rm, cp, mv
+ *   - Has: curl, wget (if Android includes them — varies by device)
+ *   - Does NOT have: python3, node, git, gcc, pip, npm
+ *   - Fast, zero overhead
  *
- * Command: /system/bin/linker64 --library-path=/data/.../usr/lib /data/.../usr/bin/bash -c "command"
+ * Tier 2 (Full Linux — requires one-time install via LinuxEnvironmentManager):
+ *   - Uses proot to run commands inside an Ubuntu 22.04 container
+ *   - Has: bash, apt, python3, perl (pre-installed)
+ *   - Can install: node, git, gcc, ffmpeg, ImageMagick, anything via apt
+ *   - /tmp is writable (proot virtualizes it)
+ *   - No path translation issues (standard Linux paths)
+ *   - Slight overhead (proot ptrace-based interception)
  *
- * However, directly invoking linker64 requires root on newer Android. So we use a fallback chain:
- * 1. Try with LD_LIBRARY_PATH + LD_PRELOAD set (works on most devices)
- * 2. If that fails, fall back to /system/bin/sh (Android's mksh — basic but works)
+ * The tier is chosen automatically:
+ *   - If Linux is installed → use Tier 2 (proot)
+ *   - If not → use Tier 1 (system shell)
+ *
+ * The agent's system prompt is honest about which tier is active.
  */
 @Singleton
 class ShellExecutor @Inject constructor(
     @ApplicationContext private val context: Context,
     private val workspace: Workspace,
-    private val bootstrapInstaller: BootstrapInstaller
+    private val linuxEnv: LinuxEnvironmentManager
 ) {
 
     data class Result(
@@ -46,7 +53,7 @@ class ShellExecutor @Inject constructor(
         val durationMs: Long,
         val timedOut: Boolean = false,
         val truncated: Boolean = false,
-        val usedBootstrap: Boolean = false
+        val usedLinux: Boolean = false
     ) {
         val isSuccess: Boolean get() = exitCode == 0 && !timedOut
     }
@@ -58,114 +65,63 @@ class ShellExecutor @Inject constructor(
     ): Result = withContext(Dispatchers.IO) {
         val start = System.currentTimeMillis()
 
-        val bootstrapPath = bootstrapInstaller.getBashPath()
-        val libDir = File(bootstrapInstaller.usrDir, "lib")
-        val termuxExec = findTermuxExec(libDir)
+        // Choose execution tier
+        val linuxInstalled = linuxEnv.isInstalled()
+        val useLinux = linuxInstalled
 
-        // Verify bootstrap is actually usable
-        val canUseBootstrap = bootstrapPath != null &&
-            File(bootstrapPath).exists() &&
-            File(bootstrapPath).canExecute() &&
-            libDir.exists() &&
-            File(libDir, "libreadline.so.8").exists()
-
-        // Choose shell command
-        // CRITICAL: Use --login so .profile is loaded (sets PREFIX for apt/pkg)
-        val shellCommand: List<String> = if (canUseBootstrap && bootstrapPath != null) {
-            // Use bootstrap bash with login flag so .profile is sourced
-            listOf(bootstrapPath, "--noprofile", "--norc", "-c", "source \"" + workspace.homeDir.absolutePath + "/.profile\" 2>/dev/null\n" + command)
+        val shellCommand: List<String> = if (useLinux) {
+            // Tier 2: run via proot inside the Ubuntu/Alpine container
+            // Working directory is /root/workspace (bind-mounted to the agent's workspace)
+            linuxEnv.buildProotCommand(command, workingDir = "/root/workspace")
         } else {
-            // Fall back to Android's system shell
+            // Tier 1: use Android's system shell
+            // Working directory is the agent's workspace
             listOf("/system/bin/sh", "-c", command)
         }
 
         val pb = ProcessBuilder(shellCommand)
-            .directory(workspace.homeDir)
+            .directory(if (useLinux) File(workspace.homeDir.absolutePath) else workspace.homeDir)
             .redirectErrorStream(false)
 
         // Set up environment
         val env = pb.environment()
-        env["HOME"] = workspace.homeDir.absolutePath
+        env["HOME"] = if (useLinux) "/root" else workspace.homeDir.absolutePath
         env["TERM"] = "xterm-256color"
         env["LANG"] = "en_US.UTF-8"
         env["LC_ALL"] = "en_US.UTF-8"
-        env["PWD"] = workspace.homeDir.absolutePath
+        env["PWD"] = if (useLinux) "/root/workspace" else workspace.homeDir.absolutePath
 
-        if (canUseBootstrap && bootstrapPath != null) {
-            val usrDir = bootstrapInstaller.usrDir
-
-            // CRITICAL: Set PATH to include bootstrap bin first
-            env["PATH"] = bootstrapInstaller.getPath()
-
-            // CRITICAL: Set LD_LIBRARY_PATH — the dynamic linker searches here for shared libs
-            env["LD_LIBRARY_PATH"] = libDir.absolutePath
-
-            // CRITICAL: Set LD_PRELOAD for termux-exec (path translation)
-            // This library intercepts file system calls and remaps
-            // /data/data/com.termux/ -> our actual paths
-            if (termuxExec != null && termuxExec.exists()) {
-                env["LD_PRELOAD"] = termuxExec.absolutePath
-            }
-
-            // CRITICAL: These env vars tell termux-exec WHERE to redirect paths
-            // Without them, termux-exec doesn't intercept any calls
-            env["PREFIX"] = usrDir.absolutePath
-            env["TERMUX_PREFIX"] = usrDir.absolutePath
-            env["TERMUX_APP__DATA_DIR"] = context.filesDir.absolutePath  // note double underscore
-            env["TERMUX_ANDROID_HOME"] = workspace.homeDir.absolutePath
-            env["TERMUX_HOME"] = workspace.homeDir.absolutePath
-
-            // Set TMPDIR to a writable location inside the workspace
-            env["TMPDIR"] = workspace.tmpDir.absolutePath
-
-            // Set COLORTERM for color support
-            env["COLORTERM"] = "truecolor"
-
-            // SSL certificate paths for curl/wget/git
-            val certDir = File(bootstrapInstaller.usrDir, "etc/ssl/certs")
-            val caBundle = File(certDir, "ca-certificates.crt")
-            if (caBundle.exists()) {
-                env["CURL_CA_BUNDLE"] = caBundle.absolutePath
-                env["SSL_CERT_FILE"] = caBundle.absolutePath
-                env["SSL_CERT_DIR"] = certDir.absolutePath
-                env["REQUESTS_CA_BUNDLE"] = caBundle.absolutePath
-                env["GIT_SSL_CAINFO"] = caBundle.absolutePath
-            }
-
-            // APT and dpkg config
-            val aptConf = File(bootstrapInstaller.usrDir, "etc/apt/apt.conf")
-            if (aptConf.exists()) env["APT_CONFIG"] = aptConf.absolutePath
-            val dpkgDir = File(bootstrapInstaller.usrDir, "var/lib/dpkg")
-            if (dpkgDir.exists()) env["DPKG_ADMINDIR"] = dpkgDir.absolutePath
-        } else {
+        if (!useLinux) {
+            // Tier 1: add system paths
             env["PATH"] = "/system/bin:/system/xbin:${env["PATH"] ?: ""}"
+            env["TMPDIR"] = workspace.tmpDir.absolutePath
         }
+        // For Tier 2 (proot), the environment is set up inside the container
 
         val process = try {
             pb.start()
         } catch (e: IOException) {
-            val diag = bootstrapInstaller.getDiagnosticInfo()
             return@withContext Result(
                 stdout = "",
-                stderr = "Failed to start process: ${e.message}\n\nDiagnostic info:\n$diag",
+                stderr = "Failed to start process: ${e.message}\n\n" +
+                    if (useLinux) "Linux environment may be corrupt. Try reinstalling from Settings."
+                    else "If you want full Linux capabilities (python3, node, git), install the Linux Environment from Settings.",
                 exitCode = -1,
                 durationMs = System.currentTimeMillis() - start,
-                usedBootstrap = canUseBootstrap
+                usedLinux = useLinux
             )
         }
 
-        val timedOut = withTimeoutOrNull((timeoutSec * 1000L)) {
+        val result = withTimeoutOrNull((timeoutSec * 1000L)) {
             coroutineScope {
                 val stdoutJob = async { readStream(process.inputStream, maxOutputBytes) }
                 val stderrJob = async { readStream(process.errorStream, maxOutputBytes) }
-                val stdout = stdoutJob.await()
-                val stderr = stderrJob.await()
-                val exitCode = process.waitFor()
-                Triple(stdout, stderr, exitCode)
+                Triple(stdoutJob.await(), stderrJob.await(), process.waitFor())
             }
         }
 
-        if (timedOut == null) {
+        if (result == null) {
+            // Timed out
             process.destroyForcibly()
             try { process.waitFor() } catch (_: Exception) {}
             Result(
@@ -174,37 +130,31 @@ class ShellExecutor @Inject constructor(
                 exitCode = -1,
                 durationMs = System.currentTimeMillis() - start,
                 timedOut = true,
-                usedBootstrap = canUseBootstrap
+                usedLinux = useLinux
             )
         } else {
-            val stdoutPair = timedOut.first
-            val stderrPair = timedOut.second
-            val exitCode = timedOut.third
+            val (stdoutPair, stderrPair, exitCode) = result
             val stdoutStr = stdoutPair.first
             val stderrStr = stderrPair.first
 
-            // If bash failed to start (exit 127 or 255 with library errors),
-            // try running with /system/bin/sh as fallback and note the issue
+            // If proot failed (e.g., SELinux blocked ptrace), fall back to system shell
             var finalStdout = stdoutStr
             var finalStderr = stderrStr
-            var finalUsedBootstrap = canUseBootstrap
+            var finalUsedLinux = useLinux
 
-            if (exitCode != 0 && canUseBootstrap && (
-                stderrStr.contains("not found", ignoreCase = true) ||
+            if (exitCode != 0 && useLinux && (
+                stderrStr.contains("proot", ignoreCase = true) ||
+                stderrStr.contains("ptrace", ignoreCase = true) ||
                 stderrStr.contains("Permission denied", ignoreCase = true) ||
-                stderrStr.contains("No such file", ignoreCase = true) ||
+                stderrStr.contains("tracee", ignoreCase = true) ||
                 exitCode == 127 || exitCode == 255
             )) {
-                // Bootstrap bash failed — try system shell as fallback
-                val fallbackResult = trySystemShell(command, timeoutSec, maxOutputBytes, start)
-                if (fallbackResult.isSuccess) {
-                    finalStdout = fallbackResult.stdout + "\n\n[Note: Bootstrap bash failed, used system shell. Run 'Verify & Repair' in Settings → Linux Environment.]"
-                    finalStderr = stderrStr  // keep original error for context
-                    finalUsedBootstrap = false
-                } else {
-                    // Both failed — append diagnostic info
-                    finalStderr = stderrStr + "\n\n--- Diagnostic Info ---\n${bootstrapInstaller.getDiagnosticInfo()}"
-                }
+                // proot failed — fall back to system shell
+                val fallbackResult = executeSystemShell(command, timeoutSec, maxOutputBytes, start)
+                finalStdout = fallbackResult.stdout +
+                    "\n\n[Note: Linux environment failed, used system shell. Error was: ${stderrStr.take(200)}]"
+                finalStderr = stderrStr
+                finalUsedLinux = false
             }
 
             Result(
@@ -213,15 +163,15 @@ class ShellExecutor @Inject constructor(
                 exitCode = exitCode,
                 durationMs = System.currentTimeMillis() - start,
                 truncated = stdoutPair.second || stderrPair.second,
-                usedBootstrap = finalUsedBootstrap
+                usedLinux = finalUsedLinux
             )
         }
     }
 
     /**
-     * Fallback: run the command with Android's system shell.
+     * Fallback: run with Android's system shell.
      */
-    private suspend fun trySystemShell(
+    private suspend fun executeSystemShell(
         command: String,
         timeoutSec: Int,
         maxOutputBytes: Int,
@@ -235,6 +185,7 @@ class ShellExecutor @Inject constructor(
         env["HOME"] = workspace.homeDir.absolutePath
         env["TERM"] = "xterm-256color"
         env["PATH"] = "/system/bin:/system/xbin:${env["PATH"] ?: ""}"
+        env["TMPDIR"] = workspace.tmpDir.absolutePath
 
         val process = try {
             pb.start()
@@ -275,12 +226,6 @@ class ShellExecutor @Inject constructor(
         }
     }
 
-    private fun findTermuxExec(libDir: File): File? {
-        if (!libDir.exists()) return null
-        val candidates = libDir.listFiles { f -> f.isFile && f.name.startsWith("libtermux-exec") } ?: return null
-        return candidates.minByOrNull { it.name.length }
-    }
-
     private fun readStream(stream: java.io.InputStream, maxBytes: Int): Pair<String, Boolean> {
         val sb = StringBuilder()
         val buf = ByteArray(8192)
@@ -294,6 +239,7 @@ class ShellExecutor @Inject constructor(
                     val toRead = maxBytes - total
                     if (toRead > 0) sb.append(String(buf, 0, toRead, Charsets.UTF_8))
                     truncated = true
+                    // Drain the rest to avoid broken pipe
                     while (stream.read(buf) >= 0) { /* discard */ }
                     break
                 }
