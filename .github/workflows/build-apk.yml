@@ -2,15 +2,15 @@ name: Build APK
 
 on:
   push:
-    branches: [ main, v2.0 ]
+    branches: [ main ]
     tags: [ 'v*' ]
   pull_request:
-    branches: [ main, v2.0 ]
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build APK
+    name: Build Release APK
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -44,7 +44,7 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build debug APK (for branch pushes & PRs)
+      - name: Build debug APK (for non-release)
         if: github.ref_type != 'tag'
         run: ./gradlew assembleDebug
 
@@ -62,21 +62,12 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-      - name: Generate SHA256 checksums
-        if: github.ref_type == 'tag'
-        run: |
-          cd app/build/outputs/apk/release/
-          for f in *.apk; do
-            sha256sum "$f" > "${f}.sha256"
-          done
-
       - name: Create GitHub Release on tag
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
           files: |
             app/build/outputs/apk/release/*.apk
-            app/build/outputs/apk/release/*.sha256
           draft: false
           prerelease: false
           generate_release_notes: true
@@ -85,26 +76,38 @@ jobs:
 
             ## Install
 
-            1. Download the APK file below (`app-release.apk`)
-            2. Optionally verify the checksum: `sha256sum app-release.apk` should match `app-release.apk.sha256`
-            3. On your Android phone, open the APK file
-            4. If prompted, allow "Install unknown apps" for your file manager
-            5. Tap Install
-
-            ## Minimum requirements
-
-            - Android 8.0 (API 26) or higher
-            - ~150 MB free storage for the Linux bootstrap (one-time download on first launch)
-            - An API key from any OpenAI-compatible provider (OpenAI, Anthropic-via-proxy, OpenRouter, z.ai, DeepSeek, Groq, Together, Ollama, vLLM, LM Studio, etc.)
+            1. Download the APK file below
+            2. On your Android phone, open the APK file
+            3. If prompted, allow "Install unknown apps" for your file manager
+            4. Tap Install
 
             ## What's new
 
-            See [CHANGELOG](https://github.com/${{ github.repository }}/blob/main/README.md#whats-new-in-v200) for the full changelog.
+            - Initial release
+            - BYOK: connect any OpenAI-compatible gateway
+            - Streaming chat with reasoning support
+            - Agent loop with bash, file_read, file_write, file_list, web_fetch tools
+            - Sandboxed workspace at /data/data/com.pocketagent/files/workspace/
+            - iOS-clean Kimi-inspired UI
+            - Dark mode (system-follow)
+            - Encrypted API key storage (Android Keystore)
 
-            ## Security
+            SHA-256 checksums are in the release assets.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-            - API keys stored encrypted via Android Keystore (AES-256-GCM)
-            - No telemetry, no analytics, no crash reporting
-            - Open source: audit the code at ${{ github.server_url }}/${{ github.repository }}
+      - name: Generate SHA256 checksums
+        if: github.ref_type == 'tag'
+        run: |
+          cd app/build/outputs/apk/release/
+          for f in *.apk; do
+            sha256sum "$f" > "${f}.sha256"
+          done
+
+      - name: Upload checksums
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/outputs/apk/release/*.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
