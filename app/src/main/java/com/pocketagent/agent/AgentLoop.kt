@@ -386,7 +386,7 @@ Install packages with: pkg install <name> or pip install <name>
 - "Permission denied" → chmod +x <file>
 - "command not found" → pkg install <package>
 - "library not found" → check LD_LIBRARY_PATH, create symlinks
-- /tmp issues → use $TMPDIR or ~/tmp instead
+- /tmp issues → use ${'$'}TMPDIR or ~/tmp instead
 
 You have TOTAL FREEDOM. Create, delete, install, build anything.
 The user sees every tool call. Be transparent but concise."""

@@ -53,6 +53,7 @@ fun FileBrowserScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val ext = extendedColors()
+    val context = androidx.compose.ui.platform.LocalContext.current
     val dateFormat = remember { SimpleDateFormat("MMM d, yyyy HH:mm", Locale.getDefault()) }
 
     Box(
