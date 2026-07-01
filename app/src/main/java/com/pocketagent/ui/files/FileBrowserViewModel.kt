@@ -2,7 +2,7 @@ package com.pocketagent.ui.files
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.pocketagent.bridge.TermuxBridge
+import com.pocketagent.cloud.CloudBridge
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,7 +33,7 @@ data class FileBrowserUiState(
 
 @HiltViewModel
 class FileBrowserViewModel @Inject constructor(
-    private val bridge: TermuxBridge
+    private val cloud: CloudBridge
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(FileBrowserUiState())
@@ -41,9 +41,9 @@ class FileBrowserViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            bridge.state.state.collect { bs ->
-                _state.update { it.copy(isConnected = bs.status == com.pocketagent.bridge.BridgeState.Status.CONNECTED) }
-                if (bs.status == com.pocketagent.bridge.BridgeState.Status.CONNECTED && _state.value.entries.isEmpty()) {
+            cloud.state.state.collect { bs ->
+                _state.update { it.copy(isConnected = bs.status == com.pocketagent.cloud.CloudState.Status.CONNECTED) }
+                if (bs.status == com.pocketagent.cloud.CloudState.Status.CONNECTED && _state.value.entries.isEmpty()) {
                     navigateTo("~")
                 }
             }
@@ -53,11 +53,11 @@ class FileBrowserViewModel @Inject constructor(
     fun navigateTo(relativePath: String) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                if (!bridge.state.isConnected) {
+                if (!cloud.state.isConnected) {
                     _state.update { it.copy(error = "Not connected to Termux daemon") }
                     return@withContext
                 }
-                val result = bridge.listFiles(relativePath)
+                val result = cloud.listFiles(relativePath)
                 val response = result.getOrElse { e ->
                     _state.update { it.copy(error = "Failed: ${e.message}") }
                     return@withContext
@@ -93,11 +93,11 @@ class FileBrowserViewModel @Inject constructor(
     fun previewFile(relativePath: String) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                if (!bridge.state.isConnected) {
+                if (!cloud.state.isConnected) {
                     _state.update { it.copy(error = "Not connected") }
                     return@withContext
                 }
-                val result = bridge.readFile(relativePath)
+                val result = cloud.readFile(relativePath)
                 val response = result.getOrElse { e ->
                     _state.update { it.copy(error = "Failed: ${e.message}") }
                     return@withContext
@@ -138,7 +138,7 @@ class FileBrowserViewModel @Inject constructor(
     fun deleteFile(relativePath: String) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                val result = bridge.deleteFile(relativePath)
+                val result = cloud.deleteFile(relativePath)
                 if (result.isFailure) {
                     _state.update { it.copy(error = result.exceptionOrNull()?.message) }
                     return@withContext

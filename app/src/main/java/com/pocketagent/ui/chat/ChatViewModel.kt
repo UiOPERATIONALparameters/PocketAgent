@@ -83,7 +83,7 @@ class ChatViewModel @Inject constructor(
     private val agentLoop: AgentLoop,
     private val toolRouter: ToolRouter,
     private val stateStore: com.pocketagent.agent.state.StateStore,
-    private val bridge: com.pocketagent.bridge.TermuxBridge
+    private val cloud: com.pocketagent.cloud.CloudBridge
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ChatUiState())

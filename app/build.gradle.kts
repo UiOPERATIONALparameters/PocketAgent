@@ -21,8 +21,8 @@ android {
         // storage (W^X exemption). No longer strictly needed since we don't run binaries
         // directly anymore, but kept for compatibility with any future features.
         targetSdk = 28
-        versionCode = 60
-        versionName = "6.0.0"
+        versionCode = 70
+        versionName = "7.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

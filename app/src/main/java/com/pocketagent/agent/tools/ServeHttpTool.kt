@@ -1,6 +1,6 @@
 package com.pocketagent.agent.tools
 
-import com.pocketagent.bridge.TermuxBridge
+import com.pocketagent.cloud.CloudBridge
 import com.pocketagent.llm.ToolSpec
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -21,7 +21,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class ServeHttpTool @Inject constructor(
-    private val bridge: TermuxBridge
+    private val cloud: CloudBridge
 ) : AgentTool {
 
     override val name = "serve_http"
@@ -56,7 +56,7 @@ class ServeHttpTool @Inject constructor(
         val port = obj["port"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 8080
         val directory = obj["directory"]?.jsonPrimitive?.contentOrNull ?: "~"
 
-        if (!bridge.state.isConnected) {
+        if (!cloud.state.isConnected) {
             return ToolResult.Error("Termux daemon not connected", "Start the daemon: `pocketagent-daemon` in Termux.")
         }
 
@@ -69,7 +69,7 @@ class ServeHttpTool @Inject constructor(
                     append("nohup python3 -m http.server $port >/dev/null 2>&1 & ")
                     append("echo \$!")
                 }
-                val result = bridge.exec(cmd, timeout = 5)
+                val result = cloud.exec(cmd, timeout = 5)
                 val response = result.getOrElse { e ->
                     return ToolResult.Error("Bridge error: ${e.message}", "Check Termux daemon is running.")
                 }
@@ -94,7 +94,7 @@ class ServeHttpTool @Inject constructor(
                     append("if [ -z \"\$pids\" ]; then echo \"no server on port $port\"; ")
                     append("else for pid in \$pids; do kill \$pid 2>/dev/null; done; echo \"stopped\"; fi")
                 }
-                val result = bridge.exec(cmd, timeout = 5)
+                val result = cloud.exec(cmd, timeout = 5)
                 val response = result.getOrElse { e ->
                     return ToolResult.Error("Bridge error: ${e.message}", "Check Termux daemon is running.")
                 }
@@ -112,7 +112,7 @@ class ServeHttpTool @Inject constructor(
                     append("ss -tlnp 2>/dev/null | grep 'python' | awk '{print \$4, \$6}' || ")
                     append("netstat -tlnp 2>/dev/null | grep 'python' | awk '{print \$4, \$6}' || echo \"(none)\"")
                 }
-                val result = bridge.exec(cmd, timeout = 5)
+                val result = cloud.exec(cmd, timeout = 5)
                 val response = result.getOrElse { e ->
                     return ToolResult.Error("Bridge error: ${e.message}", "Check Termux daemon is running.")
                 }

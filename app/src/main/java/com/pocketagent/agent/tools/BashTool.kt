@@ -1,6 +1,6 @@
 package com.pocketagent.agent.tools
 
-import com.pocketagent.bridge.TermuxBridge
+import com.pocketagent.cloud.CloudBridge
 import com.pocketagent.llm.ToolSpec
 import com.pocketagent.storage.prefs.SettingsRepository
 import kotlinx.serialization.json.Json
@@ -33,7 +33,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class BashTool @Inject constructor(
-    private val bridge: TermuxBridge,
+    private val cloud: CloudBridge,
     private val settings: SettingsRepository
 ) : AgentTool {
 
@@ -94,14 +94,14 @@ class BashTool @Inject constructor(
         val cwd = obj["cwd"]?.jsonPrimitive?.content
 
         // Check connection first
-        if (!bridge.state.isConnected) {
+        if (!cloud.state.isConnected) {
             return ToolResult.Error(
                 "Termux daemon not connected",
                 "Open Termux and run `pocketagent-daemon`, then retry. The daemon must be running for bash commands to work."
             )
         }
 
-        val result = bridge.exec(command, timeout = timeout, cwd = cwd)
+        val result = cloud.exec(command, timeout = timeout, cwd = cwd)
 
         val response = result.getOrElse { e ->
             return ToolResult.Error(

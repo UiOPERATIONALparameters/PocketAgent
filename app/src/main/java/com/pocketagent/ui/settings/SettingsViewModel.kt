@@ -2,8 +2,9 @@ package com.pocketagent.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.pocketagent.bridge.BridgeState
-import com.pocketagent.bridge.TermuxBridge
+import com.pocketagent.cloud.CloudState
+import com.pocketagent.cloud.CloudBridge
+import com.pocketagent.cloud.CodespacesManager
 import com.pocketagent.llm.ModelInfo
 import com.pocketagent.storage.ActiveProviderHolder
 import com.pocketagent.storage.prefs.SettingsRepository
@@ -33,11 +34,16 @@ data class SettingsUiState(
     val maxToolIterations: Int = 50,
     val tokenSaveMode: Boolean = false,
     val disabledSkills: String = "",
-    // v6: Termux bridge state
-    val termuxConnected: Boolean = false,
-    val termuxVersion: String? = null,
-    val termuxUser: String? = null,
-    val termuxToken: String = "",
+    // v7: Cloud settings
+    val agentMode: String = "TASK",
+    val githubToken: String = "",
+    val cloudUrl: String = "",
+    val cloudToken: String = "",
+    val cloudConnected: Boolean = false,
+    val cloudVersion: String? = null,
+    val cloudUser: String? = null,
+    val cloudStatus: String = "",
+    // v6 retained
     val autoCompactThreshold: Float = 0.7f,
     val enableSubagents: Boolean = true,
     val focusMode: Boolean = true
@@ -47,7 +53,8 @@ data class SettingsUiState(
 class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val providerHolder: ActiveProviderHolder,
-    private val bridge: TermuxBridge
+    private val cloud: CloudBridge,
+    private val codespacesManager: CodespacesManager
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsUiState())
@@ -71,7 +78,10 @@ class SettingsViewModel @Inject constructor(
                         workspaceQuotaMb = s.workspaceQuotaMb,
                         maxToolIterations = s.maxToolIterations,
                         tokenSaveMode = s.tokenSaveMode,
-                        termuxToken = s.termuxToken,
+                        agentMode = s.agentMode,
+                        githubToken = s.githubToken,
+                        cloudUrl = s.cloudUrl,
+                        cloudToken = s.cloudToken,
                         autoCompactThreshold = s.autoCompactThreshold,
                         enableSubagents = s.enableSubagents,
                         focusMode = s.focusMode
@@ -86,21 +96,24 @@ class SettingsViewModel @Inject constructor(
                         workspaceQuotaMb = s.workspaceQuotaMb,
                         maxToolIterations = s.maxToolIterations,
                         tokenSaveMode = s.tokenSaveMode,
-                        termuxToken = s.termuxToken,
+                        agentMode = s.agentMode,
+                        githubToken = s.githubToken,
+                        cloudUrl = s.cloudUrl,
+                        cloudToken = s.cloudToken,
                         autoCompactThreshold = s.autoCompactThreshold,
                         enableSubagents = s.enableSubagents,
                         focusMode = s.focusMode
                     )
                 }
             }
-            // Observe bridge state
             launch {
-                bridge.state.state.collect { bs ->
+                cloud.state.state.collect { cs ->
                     _state.update {
                         it.copy(
-                            termuxConnected = bs.status == BridgeState.Status.CONNECTED,
-                            termuxVersion = bs.daemonVersion,
-                            termuxUser = bs.termuxUser
+                            cloudConnected = cs.status == CloudState.Status.CONNECTED,
+                            cloudVersion = cs.daemonVersion,
+                            cloudUser = cs.cloudUser,
+                            cloudStatus = cs.status.name
                         )
                     }
                 }
@@ -117,7 +130,13 @@ class SettingsViewModel @Inject constructor(
     fun onMaxIterationsChange(iterations: Int) = _state.update { it.copy(maxToolIterations = iterations) }
     fun onTokenSaveModeChange(enabled: Boolean) = _state.update { it.copy(tokenSaveMode = enabled) }
     fun onDisabledSkillsChange(skills: String) = _state.update { it.copy(disabledSkills = skills) }
-    fun onTermuxTokenChange(token: String) = _state.update { it.copy(termuxToken = token) }
+    fun onAgentModeChange(mode: String) {
+        _state.update { it.copy(agentMode = mode) }
+        viewModelScope.launch { settingsRepository.updateSettings { it.copy(agentMode = mode) } }
+    }
+    fun onGithubTokenChange(token: String) = _state.update { it.copy(githubToken = token) }
+    fun onCloudUrlChange(url: String) = _state.update { it.copy(cloudUrl = url) }
+    fun onCloudTokenChange(token: String) = _state.update { it.copy(cloudToken = token) }
     fun onAutoCompactThresholdChange(v: Float) = _state.update { it.copy(autoCompactThreshold = v) }
     fun onEnableSubagentsChange(v: Boolean) = _state.update { it.copy(enableSubagents = v) }
     fun onFocusModeChange(v: Boolean) = _state.update { it.copy(focusMode = v) }
@@ -144,20 +163,9 @@ class SettingsViewModel @Inject constructor(
                 val provider = settingsRepository.getActiveProvider()
                     ?: throw IllegalStateException("Provider not configured")
                 val models = withContext(Dispatchers.IO) { providerHolder.forConfig(provider).listModels() }
-                _state.update {
-                    it.copy(
-                        testing = false,
-                        testResult = "Connected. Found ${models.size} models.",
-                        availableModels = models
-                    )
-                }
+                _state.update { it.copy(testing = false, testResult = "Connected. Found ${models.size} models.", availableModels = models) }
             } catch (e: Exception) {
-                _state.update {
-                    it.copy(
-                        testing = false,
-                        testResult = "Failed: ${e.message ?: e::class.simpleName}"
-                    )
-                }
+                _state.update { it.copy(testing = false, testResult = "Failed: ${e.message ?: e::class.simpleName}") }
             }
         }
     }
@@ -169,71 +177,41 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun saveSystemPrompt() {
+    fun saveSystemPrompt() { viewModelScope.launch { settingsRepository.updateSettings { it.copy(systemPrompt = _state.value.systemPrompt) } } }
+    fun saveBashTimeout() { viewModelScope.launch { settingsRepository.updateSettings { it.copy(bashCommandTimeoutSec = _state.value.bashTimeoutSec) } } }
+    fun saveMaxIterations() { viewModelScope.launch { settingsRepository.updateSettings { it.copy(maxToolIterations = _state.value.maxToolIterations) } } }
+    fun saveTokenSaveMode() { viewModelScope.launch { settingsRepository.updateSettings { it.copy(tokenSaveMode = _state.value.tokenSaveMode) } } }
+
+    fun saveCloudSettings() {
         viewModelScope.launch {
-            settingsRepository.updateSettings { it.copy(systemPrompt = _state.value.systemPrompt) }
+            settingsRepository.updateSettings {
+                it.copy(githubToken = _state.value.githubToken.trim(), cloudUrl = _state.value.cloudUrl.trim(), cloudToken = _state.value.cloudToken.trim())
+            }
+            cloud.refreshState()
         }
     }
 
-    fun saveBashTimeout() {
+    fun refreshCloudConnection() { viewModelScope.launch { cloud.refreshState() } }
+
+    fun createCodespace() {
         viewModelScope.launch {
-            settingsRepository.updateSettings { it.copy(bashCommandTimeoutSec = _state.value.bashTimeoutSec) }
+            _state.update { it.copy(cloudStatus = "Creating codespace...") }
+            val result = codespacesManager.ensureCodespace()
+            if (result.isSuccess) {
+                val (name, url) = result.getOrNull()!!
+                settingsRepository.updateSettings { it.copy(codespaceName = name, cloudUrl = url) }
+                _state.update { it.copy(cloudUrl = url, cloudStatus = "Codespace ready: $name") }
+                cloud.refreshState()
+            } else {
+                _state.update { it.copy(cloudStatus = "Failed: ${result.exceptionOrNull()?.message}") }
+            }
         }
     }
 
-    fun saveWorkspaceQuota() {
-        viewModelScope.launch {
-            settingsRepository.updateSettings { it.copy(workspaceQuotaMb = _state.value.workspaceQuotaMb) }
-        }
-    }
-
-    fun saveMaxIterations() {
-        viewModelScope.launch {
-            settingsRepository.updateSettings { it.copy(maxToolIterations = _state.value.maxToolIterations) }
-        }
-    }
-
-    fun saveTokenSaveMode() {
-        viewModelScope.launch {
-            settingsRepository.updateSettings { it.copy(tokenSaveMode = _state.value.tokenSaveMode) }
-        }
-    }
-
-    fun saveTermuxToken() {
-        viewModelScope.launch {
-            settingsRepository.updateSettings { it.copy(termuxToken = _state.value.termuxToken.trim()) }
-            // Test the connection
-            bridge.refreshState()
-        }
-    }
-
-    fun saveAutoCompactThreshold() {
-        viewModelScope.launch {
-            settingsRepository.updateSettings { it.copy(autoCompactThreshold = _state.value.autoCompactThreshold) }
-        }
-    }
-
-    fun saveEnableSubagents() {
-        viewModelScope.launch {
-            settingsRepository.updateSettings { it.copy(enableSubagents = _state.value.enableSubagents) }
-        }
-    }
-
-    fun saveFocusMode() {
-        viewModelScope.launch {
-            settingsRepository.updateSettings { it.copy(focusMode = _state.value.focusMode) }
-        }
-    }
-
-    fun refreshTermuxConnection() {
-        viewModelScope.launch {
-            bridge.refreshState()
-        }
-    }
-
-    fun clearTestResult() {
-        _state.update { it.copy(testResult = null) }
-    }
+    fun saveAutoCompactThreshold() { viewModelScope.launch { settingsRepository.updateSettings { it.copy(autoCompactThreshold = _state.value.autoCompactThreshold) } } }
+    fun saveEnableSubagents() { viewModelScope.launch { settingsRepository.updateSettings { it.copy(enableSubagents = _state.value.enableSubagents) } } }
+    fun saveFocusMode() { viewModelScope.launch { settingsRepository.updateSettings { it.copy(focusMode = _state.value.focusMode) } } }
+    fun clearTestResult() { _state.update { it.copy(testResult = null) } }
 
     private fun refreshModels() {
         viewModelScope.launch {
@@ -242,9 +220,7 @@ class SettingsViewModel @Inject constructor(
                 val models = withContext(Dispatchers.IO) { providerHolder.forConfig(provider).listModels() }
                 _state.update { it.copy(availableModels = models) }
             } catch (e: Exception) {
-                _state.update {
-                    it.copy(testResult = "Couldn't fetch models: ${e.message ?: e::class.simpleName}")
-                }
+                _state.update { it.copy(testResult = "Couldn't fetch models: ${e.message ?: e::class.simpleName}") }
             }
         }
     }
@@ -255,12 +231,7 @@ class SettingsViewModel @Inject constructor(
             providers.forEach { settingsRepository.deleteProvider(it.id) }
             settingsRepository.updateSettings { it.copy(activeProviderId = null, activeModelId = null) }
             _state.update {
-                SettingsUiState(
-                    versionName = com.pocketagent.BuildConfig.VERSION_NAME,
-                    systemPrompt = it.systemPrompt,
-                    bashTimeoutSec = it.bashTimeoutSec,
-                    workspaceQuotaMb = it.workspaceQuotaMb
-                )
+                SettingsUiState(versionName = com.pocketagent.BuildConfig.VERSION_NAME, systemPrompt = it.systemPrompt, bashTimeoutSec = it.bashTimeoutSec, workspaceQuotaMb = it.workspaceQuotaMb)
             }
         }
     }

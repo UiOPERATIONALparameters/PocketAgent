@@ -1,6 +1,6 @@
 package com.pocketagent.agent.tools
 
-import com.pocketagent.bridge.TermuxBridge
+import com.pocketagent.cloud.CloudBridge
 import com.pocketagent.llm.ToolSpec
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -19,7 +19,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class GrepTool @Inject constructor(
-    private val bridge: TermuxBridge
+    private val cloud: CloudBridge
 ) : AgentTool {
 
     override val name = "grep"
@@ -42,7 +42,7 @@ class GrepTool @Inject constructor(
         val glob = obj["glob"]?.jsonPrimitive?.contentOrNull ?: "*"
         val caseInsensitive = obj["case_insensitive"]?.jsonPrimitive?.contentOrNull?.equals("true", ignoreCase = true) == true
 
-        if (!bridge.state.isConnected) {
+        if (!cloud.state.isConnected) {
             return ToolResult.Error("Termux daemon not connected", "Start the daemon: `pocketagent-daemon` in Termux.")
         }
 
@@ -75,7 +75,7 @@ class GrepTool @Inject constructor(
             append("fi")
         }
 
-        val result = bridge.exec(cmd, timeout = 30)
+        val result = cloud.exec(cmd, timeout = 30)
         val response = result.getOrElse { e ->
             return ToolResult.Error("Bridge error: ${e.message}", "Check Termux daemon is running.")
         }

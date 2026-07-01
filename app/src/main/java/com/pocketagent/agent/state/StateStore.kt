@@ -1,6 +1,6 @@
 package com.pocketagent.agent.state
 
-import com.pocketagent.bridge.TermuxBridge
+import com.pocketagent.cloud.CloudBridge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -21,7 +21,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class StateStore @Inject constructor(
-    private val bridge: TermuxBridge
+    private val cloud: CloudBridge
 ) {
     companion object {
         const val WORKLOG_PATH = "~/.pocketagent/worklog.md"
@@ -36,38 +36,38 @@ class StateStore @Inject constructor(
      */
     suspend fun initialize(): Result<Unit> = withContext(Dispatchers.IO) {
         // mkdir
-        bridge.mkdir(STATE_DIR)
+        cloud.mkdir(STATE_DIR)
         // Create empty worklog if missing
-        val worklog = bridge.readFile(WORKLOG_PATH)
+        val worklog = cloud.readFile(WORKLOG_PATH)
         if (worklog.isFailure || worklog.getOrNull()?.content.isNullOrEmpty()) {
-            bridge.writeFile(WORKLOG_PATH, "# PocketAgent Worklog\n\nThis file is a persistent log of everything the agent has done.\nIt is injected into every new conversation as context.\nAppend new entries at the bottom.\n\n")
+            cloud.writeFile(WORKLOG_PATH, "# PocketAgent Worklog\n\nThis file is a persistent log of everything the agent has done.\nIt is injected into every new conversation as context.\nAppend new entries at the bottom.\n\n")
         }
         // Create empty scratchpad if missing
-        val scratch = bridge.readFile(SCRATCHPAD_PATH)
+        val scratch = cloud.readFile(SCRATCHPAD_PATH)
         if (scratch.isFailure || scratch.getOrNull()?.content.isNullOrEmpty()) {
-            bridge.writeFile(SCRATCHPAD_PATH, "# PocketAgent Scratchpad\n\nRunning notes for the current agent session.\nUpdate this whenever you learn something important:\n- file locations\n- decisions made\n- things tried that didn't work\n- next steps\n\n")
+            cloud.writeFile(SCRATCHPAD_PATH, "# PocketAgent Scratchpad\n\nRunning notes for the current agent session.\nUpdate this whenever you learn something important:\n- file locations\n- decisions made\n- things tried that didn't work\n- next steps\n\n")
         }
         // Create empty todos if missing
-        val todos = bridge.readFile(TODOS_PATH)
+        val todos = cloud.readFile(TODOS_PATH)
         if (todos.isFailure || todos.getOrNull()?.content.isNullOrEmpty()) {
-            bridge.writeFile(TODOS_PATH, "[]")
+            cloud.writeFile(TODOS_PATH, "[]")
         }
         Result.success(Unit)
     }
 
     /** Read the current scratchpad (for system prompt injection). */
     suspend fun getScratchpad(): String = withContext(Dispatchers.IO) {
-        bridge.readFile(SCRATCHPAD_PATH).getOrNull()?.content ?: ""
+        cloud.readFile(SCRATCHPAD_PATH).getOrNull()?.content ?: ""
     }
 
     /** Overwrite the scratchpad with new content. */
     suspend fun setScratchpad(content: String): Result<Unit> = withContext(Dispatchers.IO) {
-        bridge.writeFile(SCRATCHPAD_PATH, content).map { }
+        cloud.writeFile(SCRATCHPAD_PATH, content).map { }
     }
 
     /** Read the worklog (for system prompt injection — last 4KB only). */
     suspend fun getWorklogTail(maxBytes: Int = 4096): String = withContext(Dispatchers.IO) {
-        val full = bridge.readFile(WORKLOG_PATH).getOrNull()?.content ?: ""
+        val full = cloud.readFile(WORKLOG_PATH).getOrNull()?.content ?: ""
         if (full.length <= maxBytes) full else full.takeLast(maxBytes)
     }
 
@@ -84,8 +84,8 @@ class StateStore @Inject constructor(
             append("\n")
         }
         // Append by reading + writing (daemon doesn't have an append endpoint)
-        val current = bridge.readFile(WORKLOG_PATH).getOrNull()?.content ?: ""
-        bridge.writeFile(WORKLOG_PATH, current + block).map { }
+        val current = cloud.readFile(WORKLOG_PATH).getOrNull()?.content ?: ""
+        cloud.writeFile(WORKLOG_PATH, current + block).map { }
     }
 
     /** Get the full state snapshot for system prompt injection. */

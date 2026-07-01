@@ -1,6 +1,8 @@
 package com.pocketagent.agent.tools
 
+import com.pocketagent.cloud.CloudState
 import com.pocketagent.llm.ToolSpec
+import com.pocketagent.storage.prefs.SettingsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
@@ -8,13 +10,12 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * v6 ToolRouter — registers all tools, including the new compact, task, and state tools.
+ * v7 ToolRouter — supports mode-based tool filtering.
  *
- * Tools (17 total):
- *   bash, file_read, file_write, file_list, str_replace, grep, glob,
- *   web_fetch, web_search, web_reader, load_skill, install_apk,
- *   todo, serve_http,
- *   compact (NEW), task (NEW — replaces spawn_subagent), state (NEW)
+ * TASK mode: all 17 tools (bash, file_*, grep, glob, web_*, task, compact, state, etc.)
+ *   - Requires cloud connection
+ * CHAT mode: only web_search, web_fetch, web_reader, todo, compact, state
+ *   - No cloud needed, just LLM + web
  */
 @Singleton
 class ToolRouter @Inject constructor(
@@ -34,9 +35,11 @@ class ToolRouter @Inject constructor(
     private val serveHttpTool: ServeHttpTool,
     private val compactTool: CompactTool,
     private val taskTool: TaskTool,
-    private val stateTool: StateTool
+    private val stateTool: StateTool,
+    private val settings: SettingsRepository,
+    private val cloudState: CloudState
 ) {
-    private val tools: Map<String, AgentTool> = mapOf(
+    private val allTools: Map<String, AgentTool> = mapOf(
         bashTool.name to bashTool,
         fileReadTool.name to fileReadTool,
         fileWriteTool.name to fileWriteTool,
@@ -56,37 +59,60 @@ class ToolRouter @Inject constructor(
         stateTool.name to stateTool
     )
 
-    fun specs(): List<ToolSpec> = listOf(
-        bashTool.toSpec(),
-        fileReadTool.toSpec(),
-        fileWriteTool.toSpec(),
-        fileListTool.toSpec(),
-        strReplaceTool.toSpec(),
-        grepTool.toSpec(),
-        globTool.toSpec(),
-        webFetchTool.toSpec(),
-        webSearchTool.toSpec(),
-        webReaderTool.toSpec(),
-        loadSkillTool.toSpec(),
-        installApkTool.toSpec(),
-        todoTool.toSpec(),
-        serveHttpTool.toSpec(),
-        compactTool.toSpec(),
-        taskTool.toSpec(),
-        stateTool.toSpec()
+    /** Tools available in CHAT mode (no cloud needed). */
+    private val chatModeTools = setOf(
+        "web_search", "web_fetch", "web_reader", "todo", "compact", "state"
     )
 
+    /** Get the active mode. */
+    private val isChatMode: Boolean
+        get() = settings.settings.value.agentMode == "CHAT"
+
+    /** Get specs for the current mode. */
+    fun specs(): List<ToolSpec> {
+        val activeNames = if (isChatMode) chatModeTools else allTools.keys
+        return allTools.entries
+            .filter { it.key in activeNames }
+            .map { (name, tool) ->
+                when (tool) {
+                    is BashTool -> tool.toSpec()
+                    is FileReadTool -> tool.toSpec()
+                    is FileWriteTool -> tool.toSpec()
+                    is FileListTool -> tool.toSpec()
+                    is WebFetchTool -> tool.toSpec()
+                    is WebSearchTool -> tool.toSpec()
+                    is StrReplaceTool -> tool.toSpec()
+                    is GrepTool -> tool.toSpec()
+                    is GlobTool -> tool.toSpec()
+                    is InstallApkTool -> tool.toSpec()
+                    is LoadSkillTool -> tool.toSpec()
+                    is WebReaderTool -> tool.toSpec()
+                    is TodoTool -> tool.toSpec()
+                    is ServeHttpTool -> tool.toSpec()
+                    is CompactTool -> tool.toSpec()
+                    is TaskTool -> tool.toSpec()
+                    is StateTool -> tool.toSpec()
+                    else -> ToolSpec(tool.name, tool.description, tool.parametersSchema)
+                }
+            }
+    }
+
     suspend fun execute(toolName: String, arguments: JsonElement): ToolResult {
-        val tool = tools[toolName] ?: return ToolResult.Error(
-            "Unknown tool: $toolName",
-            "Available tools: ${tools.keys.joinToString(", ")}"
-        )
+        val activeNames = if (isChatMode) chatModeTools else allTools.keys
+        if (toolName !in activeNames) {
+            return ToolResult.Error(
+                "Tool '$toolName' not available in ${if (isChatMode) "CHAT" else "TASK"} mode",
+                if (isChatMode) "Switch to TASK mode in Settings to use cloud Linux tools."
+                else "Available tools: ${activeNames.joinToString(", ")}"
+            )
+        }
+        val tool = allTools[toolName] ?: return ToolResult.Error("Unknown tool: $toolName")
         return try {
             withContext(Dispatchers.IO) { tool.execute(arguments) }
         } catch (e: Exception) {
             ToolResult.Error(
                 "Tool execution failed: ${e.message ?: e::class.simpleName}",
-                "This is an unexpected error. Try a different approach or report the error."
+                "Try a different approach or report the error."
             )
         }
     }

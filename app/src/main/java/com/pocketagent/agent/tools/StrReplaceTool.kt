@@ -1,6 +1,6 @@
 package com.pocketagent.agent.tools
 
-import com.pocketagent.bridge.TermuxBridge
+import com.pocketagent.cloud.CloudBridge
 import com.pocketagent.llm.ToolSpec
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -17,7 +17,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class StrReplaceTool @Inject constructor(
-    private val bridge: TermuxBridge
+    private val cloud: CloudBridge
 ) : AgentTool {
 
     override val name = "str_replace"
@@ -41,12 +41,12 @@ class StrReplaceTool @Inject constructor(
             ?: return ToolResult.Error("Missing 'new_str'", "Provide a 'new_str' field with the replacement text.")
         val replaceAll = obj["replace_all"]?.jsonPrimitive?.contentOrNull == "true"
 
-        if (!bridge.state.isConnected) {
+        if (!cloud.state.isConnected) {
             return ToolResult.Error("Termux daemon not connected", "Start the daemon: `pocketagent-daemon` in Termux.")
         }
 
         // Read the file
-        val readResult = bridge.readFile(pathStr)
+        val readResult = cloud.readFile(pathStr)
         val readResp = readResult.getOrElse { e ->
             return ToolResult.Error("Bridge error: ${e.message}", "Check Termux daemon is running.")
         }
@@ -78,7 +78,7 @@ class StrReplaceTool @Inject constructor(
         }
 
         // Write back
-        val writeResult = bridge.writeFile(pathStr, newContent)
+        val writeResult = cloud.writeFile(pathStr, newContent)
         val writeResp = writeResult.getOrElse { e ->
             return ToolResult.Error("Bridge error: ${e.message}", "Check Termux daemon is running.")
         }

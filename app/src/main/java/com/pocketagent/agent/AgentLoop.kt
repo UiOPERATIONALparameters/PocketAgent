@@ -5,7 +5,7 @@ import com.pocketagent.agent.state.StateStore
 import com.pocketagent.agent.tools.AgentTool
 import com.pocketagent.agent.tools.ToolResult
 import com.pocketagent.agent.tools.ToolRouter
-import com.pocketagent.bridge.TermuxBridge
+import com.pocketagent.cloud.CloudBridge
 import com.pocketagent.llm.ChatMessage
 import com.pocketagent.llm.LlmProvider
 import com.pocketagent.llm.LlmRequest
@@ -31,7 +31,7 @@ import javax.inject.Singleton
  *   - ContextManager (auto-compact at 70% of context window)
  *   - StateStore (worklog.md + scratchpad.md injected into system prompt)
  *   - Structured tool errors (suggestion field)
- *   - Workspace state from the real Termux (via TermuxBridge)
+ *   - Workspace state from the real Termux (via CloudBridge)
  *
  * Loop:
  *   1. Build system prompt (default + tool list + workspace state + persistent state)
@@ -46,7 +46,7 @@ import javax.inject.Singleton
 @Singleton
 class AgentLoop @Inject constructor(
     private val toolRouter: ToolRouter,
-    private val bridge: TermuxBridge,
+    private val cloud: CloudBridge,
     private val contextManager: ContextManager,
     private val stateStore: StateStore,
     private val activeProviderHolder: ActiveProviderHolder,
@@ -325,7 +325,7 @@ class AgentLoop @Inject constructor(
     private suspend fun buildSystemPrompt(userPrompt: String, tokenSaveMode: Boolean): String {
         val sb = StringBuilder()
 
-        val effectiveDefault = DEFAULT_SYSTEM_PROMPT
+        val effectiveDefault = if (settings.settings.value.agentMode == "CHAT") DEFAULT_SYSTEM_PROMPT_CHAT else DEFAULT_SYSTEM_PROMPT_TASK
         sb.append(if (userPrompt.isNotBlank() && userPrompt != DEFAULT_SYSTEM_PROMPT) userPrompt else effectiveDefault)
         sb.append("\n\n")
 
@@ -363,18 +363,18 @@ class AgentLoop @Inject constructor(
      */
     private suspend fun generateWorkspaceState(): String {
         return try {
-            if (!bridge.state.isConnected) {
+            if (!cloud.state.isConnected) {
                 return "Termux: NOT CONNECTED. Tell the user to start the daemon (`pocketagent-daemon` in Termux).\n"
             }
             val sb = StringBuilder()
             // Health gives us user + home
             sb.append("Environment: Termux (real Linux on Android)\n")
-            bridge.state.current.let { s ->
-                sb.append("User: ${s.termuxUser ?: "unknown"}\n")
-                sb.append("Home: ${s.termuxHome ?: "~"}\n")
+            cloud.state.current.let { s ->
+                sb.append("User: ${s.cloudUser ?: "unknown"}\n")
+                sb.append("Home: ${s.cloudHome ?: "~"}\n")
             }
             // Top-level files in home (max 20)
-            val listResult = bridge.listFiles("~")
+            val listResult = cloud.listFiles("~")
             listResult.getOrNull()?.let { resp ->
                 val entries = resp.entries.take(20)
                 if (entries.isNotEmpty()) {
@@ -415,24 +415,23 @@ class AgentLoop @Inject constructor(
     )
 
     companion object {
-        val DEFAULT_SYSTEM_PROMPT = """You are PocketAgent, an AI agent on the user's Android phone with FULL access to their real Termux Linux environment.
+        val DEFAULT_SYSTEM_PROMPT_TASK = """You are PocketAgent, an AI agent running in a real cloud Linux environment (GitHub Codespaces). You have TOTAL FREEDOM — a real Ubuntu VM with glibc, real apt, real everything.
 
 ## Your Environment
-- Real Termux Linux on Android — same packages, same ${'$'}PATH, same git config as the user
-- Private workspace at ~ (the user's Termux home)
-- Full bash with all installed tools (python, node, gcc, git, etc.)
-- Install ANYTHING with pkg: `pkg install <name>` (e.g., `pkg install python nodejs git gcc ffmpeg`)
-- /tmp IS available (real Linux, not the old sandboxed environment)
+- Real cloud Linux (Ubuntu) — full glibc, real /usr/bin, real apt
+- 4-core CPU, 16GB RAM, 32GB persistent storage
+- Install ANYTHING with apt: `sudo apt install <name>` (e.g., `sudo apt install python3 nodejs git gcc ffmpeg openjdk-17 gradle`)
+- pip install for Python packages, npm for Node
+- /tmp IS available, /workspace is your home
 - The user sees every tool call. Be transparent but concise.
 
 ## Your Capabilities
 You have TOTAL FREEDOM. You can:
-- Build websites (pkg install nodejs; any JS framework)
-- Run Python scripts (pkg install python; pip install any package)
-- Compile C/C++ (pkg install clang)
-- Process media (pkg install ffmpeg imagemagick)
-- Build Android APKs (pkg install openjdk-17 gradle)
-- Install the APKs you build (install_apk tool)
+- Build websites (any JS framework — Next.js, React, Astro, etc.)
+- Run Python scripts (pip install any package)
+- Compile C/C++/Rust/Go (sudo apt install clang rustc golang)
+- Process media (sudo apt install ffmpeg imagemagick)
+- Build Android APKs (sudo apt install openjdk-17 gradle)
 - Run any shell command, write any file, fetch any URL
 - Search the web for current information
 - Spawn subagents for parallel/delegated work (task tool)
@@ -446,34 +445,61 @@ You have TOTAL FREEDOM. You can:
 5. Don't repeat failing commands — try a different approach immediately
 6. If a tool fails, READ the suggestion field — it tells you what to do next
 7. For long outputs, use `head -50` or `tail -50` to limit output
-8. When installing packages, use 'pkg install -y <name>' (non-interactive)
-9. Use the `task` tool for any subtask that would consume many tool calls (research, refactoring)
+8. When installing packages, use 'sudo apt install -y <name>' (non-interactive)
+9. Use the `task` tool for any subtask that would consume many tool calls
 10. Update the `state` scratchpad when you learn something important
 
 ## Tool Selection Guide
 - Editing code? → str_replace (NOT file_write)
-- Finding code? → grep (uses ripgrep if installed)
+- Finding code? → grep (uses ripgrep)
 - Finding files? → glob
 - Reading files? → file_read
 - Listing a directory? → file_list
-- Running commands? → bash (real Termux environment)
+- Running commands? → bash (real cloud Linux)
 - Downloading? → web_fetch (text) or bash curl (binary)
 - Searching web? → web_search
 - Reading a webpage cleanly? → web_reader
-- Loading a skill for a specific task? → load_skill
+- Loading a skill? → load_skill
 - Built an APK? → install_apk
 - Need to serve a website? → serve_http
 - Tracking multi-step tasks? → todo
 - Need parallel/delegated work? → task (spawns a subagent)
-- Want to remember something for next session? → state
+- Want to remember something? → state
 - Conversation getting long? → compact
 
 ## Recovery
 - Tool errors return a `suggestion` field — follow it
-- If bash fails with "command not found", install it: `pkg install <name>`
+- If bash fails with "command not found", install it: `sudo apt install <name>`
 - If you hit context limits, call `compact` to summarize
 
-You have TOTAL FREEDOM. Create, delete, install, build anything."""
+You have TOTAL FREEDOM. Create, delete, install, build anything. This is your computer."""
+
+        val DEFAULT_SYSTEM_PROMPT_CHAT = """You are PocketAgent, an AI assistant in CHAT mode. You don't have access to a Linux environment in this mode — you're a smart chat companion with web access.
+
+## Your Capabilities (Chat Mode)
+- Search the web for current information (web_search)
+- Fetch and read web pages (web_fetch, web_reader)
+- Track multi-step tasks (todo)
+- Remember things across conversations (state tool)
+- Compact long conversations (compact)
+
+## When to suggest switching to TASK mode
+If the user asks you to:
+- Run code, build something, install packages
+- Edit files, write scripts
+- Do anything that needs a real Linux environment
+...tell them: "Switch to TASK mode in Settings to enable cloud Linux. I can then run commands, build projects, and do real work."
+
+## Style
+- Be concise and helpful
+- Use web_search when you need current info
+- Use web_reader to read articles cleanly
+- Track complex tasks with todo
+
+You're in CHAT mode — no cloud Linux. Be honest about this limitation."""
+
+        /** Alias — picks the right prompt based on mode. */
+        val DEFAULT_SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT_TASK
     }
 }
 

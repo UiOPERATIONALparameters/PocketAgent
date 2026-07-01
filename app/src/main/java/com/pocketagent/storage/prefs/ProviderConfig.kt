@@ -40,7 +40,13 @@ data class AppSettings(
     val termuxToken: String = "",               // v6: auth token for ~/.pocketagent/token
     val autoCompactThreshold: Float = 0.7f,     // v6: auto-compact at 70% of context window
     val enableSubagents: Boolean = true,        // v6: allow task() tool to spawn subagents
-    val focusMode: Boolean = true               // v6: eink-style low-contrast theme
+    val focusMode: Boolean = true,              // v6: eink-style low-contrast theme
+    // v7: Cloud (GitHub Codespaces) settings
+    val agentMode: String = "TASK",             // v7: TASK (cloud Linux) or CHAT (LLM + web only)
+    val githubToken: String = "",               // v7: GitHub PAT for Codespaces API
+    val cloudUrl: String = "",                  // v7: codespace daemon URL
+    val cloudToken: String = "",                // v7: daemon auth token
+    val codespaceName: String = ""              // v7: codespace name (for management)
 ) {
     enum class ThemeMode { SYSTEM, LIGHT, DARK }
 }

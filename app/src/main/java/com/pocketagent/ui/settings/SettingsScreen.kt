@@ -47,12 +47,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pocketagent.design.PocketType
@@ -368,7 +370,7 @@ fun SettingsScreen(
                     SaveButton(
                         text = "Save Quota",
                         onClick = {
-                            viewModel.saveWorkspaceQuota()
+                            // v7: quota not used in cloud mode, but kept for compat
                             Toast.makeText(context, "Quota saved: ${state.workspaceQuotaMb}MB", Toast.LENGTH_SHORT).show()
                         }
                     )
@@ -450,144 +452,94 @@ fun SettingsScreen(
                     }
                 }
 
-                // v6: Termux Bridge section
-                Section(title = "Termux Connection") {
-                    if (state.termuxConnected) {
-                        // Connected state
-                        Surface(
-                            color = ext.success.copy(alpha = 0.1f),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
+
+                // v7: Cloud (GitHub Codespaces) section
+                Section(title = "Cloud Linux (GitHub Codespaces)") {
+                    // Mode toggle — Chat vs Task
+                    Text(
+                        "Agent Mode",
+                        style = PocketType.Label,
+                        color = ext.textSecondary
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(ext.surfaceSubtle)
+                            .padding(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        listOf(
+                            Triple("CHAT", "Chat", "💬"),
+                            Triple("TASK", "Task", "⚡")
+                        ).forEach { (modeValue, modeLabel, icon) ->
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (state.agentMode == modeValue) ext.accent else androidx.compose.ui.graphics.Color.Transparent)
+                                    .clickable { viewModel.onAgentModeChange(modeValue) }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
                                 Text(
-                                    "Connected to Termux ✓",
+                                    "$icon $modeLabel",
                                     style = PocketType.BodyMedium,
-                                    color = ext.success
-                                )
-                                state.termuxVersion?.let {
-                                    Text(
-                                        "Daemon: v$it",
-                                        style = PocketType.BodySmall,
-                                        color = ext.textSecondary,
-                                        modifier = Modifier.padding(top = 4.dp)
-                                    )
-                                }
-                                state.termuxUser?.let {
-                                    Text(
-                                        "User: $it",
-                                        style = PocketType.BodySmall,
-                                        color = ext.textSecondary
-                                    )
-                                }
-                                Text(
-                                    "The AI has full access to your Termux environment — same packages, same \${'$'}PATH, same git config.",
-                                    style = PocketType.BodySmall,
-                                    color = ext.textSecondary,
-                                    modifier = Modifier.padding(top = 4.dp)
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        Surface(
-                            onClick = { viewModel.refreshTermuxConnection() },
-                            color = ext.surfaceSubtle,
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                "Refresh Connection",
-                                style = PocketType.BodyMedium,
-                                color = ext.textPrimary,
-                                modifier = Modifier.padding(14.dp)
-                            )
-                        }
-                    } else {
-                        // Disconnected state
-                        Surface(
-                            color = ext.error.copy(alpha = 0.08f),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Text(
-                                    "Termux not connected",
-                                    style = PocketType.BodyMedium,
-                                    color = ext.error
-                                )
-                                Text(
-                                    "1. Install Termux from F-Droid",
-                                    style = PocketType.BodySmall,
-                                    color = ext.textSecondary,
-                                    modifier = Modifier.padding(top = 8.dp)
-                                )
-                                Text(
-                                    "2. Open Termux and run this command:",
-                                    style = PocketType.BodySmall,
-                                    color = ext.textSecondary,
-                                    modifier = Modifier.padding(top = 4.dp)
-                                )
-                                Spacer(Modifier.height(8.dp))
-                                // Command with Copy button
-                                val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
-                                val context = androidx.compose.ui.platform.LocalContext.current
-                                var copied by remember { mutableStateOf(false) }
-                                val installCmd = "curl -sL https://tinyurl.com/286scpfd | bash"
-                                Surface(
-                                    color = ext.surfaceSubtle,
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            installCmd,
-                                            style = PocketType.CodeSmall,
-                                            color = ext.textPrimary,
-                                            modifier = Modifier.weight(1f).padding(end = 8.dp)
-                                        )
-                                        Surface(
-                                            onClick = {
-                                                clipboard.setText(androidx.compose.ui.text.AnnotatedString(installCmd))
-                                                copied = true
-                                                Toast.makeText(context, "Copied! Paste in Termux now", Toast.LENGTH_SHORT).show()
-                                            },
-                                            color = if (copied) ext.success else ext.accent,
-                                            shape = RoundedCornerShape(6.dp)
-                                        ) {
-                                            Text(
-                                                if (copied) "✓" else "Copy",
-                                                style = PocketType.Label,
-                                                color = ext.textOnAccent,
-                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                                Spacer(Modifier.height(8.dp))
-                                Text(
-                                    "3. Copy the token the installer prints, paste it below, tap Save",
-                                    style = PocketType.BodySmall,
-                                    color = ext.textSecondary
+                                    color = if (state.agentMode == modeValue) ext.textOnAccent else ext.textSecondary
                                 )
                             }
                         }
                     }
+                    Text(
+                        if (state.agentMode == "CHAT") "Chat mode: LLM + web search only. No cloud needed."
+                        else "Task mode: Full agent with cloud Linux. Requires codespace.",
+                        style = PocketType.BodySmall,
+                        color = ext.textSecondary,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+
+                    Spacer(Modifier.height(16.dp))
+
+                    // GitHub PAT
+                    Text("GitHub Personal Access Token", style = PocketType.Label, color = ext.textSecondary)
+                    Text(
+                        "Create at github.com/settings/tokens — needs 'codespace' scope",
+                        style = PocketType.BodySmall,
+                        color = ext.textTertiary,
+                        modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)
+                    )
+                    OutlinedTextField(
+                        value = state.githubToken,
+                        onValueChange = { viewModel.onGithubTokenChange(it) },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("ghp_...") },
+                        textStyle = PocketType.BodyMedium,
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = ext.textPrimary,
+                            unfocusedTextColor = ext.textPrimary,
+                            focusedBorderColor = ext.accent,
+                            unfocusedBorderColor = ext.divider
+                        )
+                    )
 
                     Spacer(Modifier.height(12.dp))
+
+                    // Cloud URL
+                    Text("Codespace URL", style = PocketType.Label, color = ext.textSecondary)
                     Text(
-                        "Termux Token",
-                        style = PocketType.Label,
-                        color = ext.textSecondary
+                        "Format: https://<codespace-name>-8765.app.github.dev",
+                        style = PocketType.BodySmall,
+                        color = ext.textTertiary,
+                        modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)
                     )
-                    Spacer(Modifier.height(4.dp))
                     OutlinedTextField(
-                        value = state.termuxToken,
-                        onValueChange = { viewModel.onTermuxTokenChange(it) },
+                        value = state.cloudUrl,
+                        onValueChange = { viewModel.onCloudUrlChange(it) },
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Paste token from ~/.pocketagent/token") },
+                        placeholder = { Text("https://...app.github.dev") },
                         textStyle = PocketType.BodyMedium,
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
@@ -597,23 +549,111 @@ fun SettingsScreen(
                             unfocusedBorderColor = ext.divider
                         )
                     )
-                    Spacer(Modifier.height(8.dp))
-                    Surface(
-                        onClick = { viewModel.saveTermuxToken() },
-                        color = ext.accent,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            "Save Token & Connect",
-                            style = PocketType.BodyMedium,
-                            color = ext.textOnAccent,
-                            modifier = Modifier.padding(14.dp)
+
+                    Spacer(Modifier.height(12.dp))
+
+                    // Cloud token
+                    Text("Daemon Token", style = PocketType.Label, color = ext.textSecondary)
+                    Text(
+                        "From ~/.pocketagent/token inside the codespace",
+                        style = PocketType.BodySmall,
+                        color = ext.textTertiary,
+                        modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)
+                    )
+                    OutlinedTextField(
+                        value = state.cloudToken,
+                        onValueChange = { viewModel.onCloudTokenChange(it) },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("token from codespace") },
+                        textStyle = PocketType.BodyMedium,
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = ext.textPrimary,
+                            unfocusedTextColor = ext.textPrimary,
+                            focusedBorderColor = ext.accent,
+                            unfocusedBorderColor = ext.divider
                         )
+                    )
+
+                    Spacer(Modifier.height(12.dp))
+
+                    // Action buttons
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            onClick = { viewModel.saveCloudSettings() },
+                            color = ext.accent,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                "Save & Connect",
+                                style = PocketType.BodyMedium,
+                                color = ext.textOnAccent,
+                                modifier = Modifier.padding(14.dp),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+
+                    // Connection status
+                    Spacer(Modifier.height(12.dp))
+                    if (state.cloudConnected) {
+                        Surface(
+                            color = ext.success.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text("✓ Connected to cloud Linux", style = PocketType.BodyMedium, color = ext.success)
+                                state.cloudVersion?.let { Text("Daemon v$it", style = PocketType.BodySmall, color = ext.textSecondary) }
+                                state.cloudUser?.let { Text("User: $it", style = PocketType.BodySmall, color = ext.textSecondary) }
+                            }
+                        }
+                    }
+
+                    // Codespace management
+                    Spacer(Modifier.height(12.dp))
+                    Text("Codespace Management", style = PocketType.Label, color = ext.textSecondary)
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            onClick = { viewModel.createCodespace() },
+                            color = ext.surfaceSubtle,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                "Create Codespace",
+                                style = PocketType.BodyMedium,
+                                color = ext.textPrimary,
+                                modifier = Modifier.padding(12.dp),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                        Surface(
+                            onClick = { viewModel.refreshCloudConnection() },
+                            color = ext.surfaceSubtle,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                "Refresh",
+                                style = PocketType.BodyMedium,
+                                color = ext.textPrimary,
+                                modifier = Modifier.padding(12.dp),
+                                textAlign = TextAlign.Center
+                            )
+                        }
                     }
                 }
 
-                // v6: Agent Capabilities section
+                // v7: Agent Capabilities section
                 Section(title = "Agent Capabilities") {
                     // Auto-compact threshold
                     Text(

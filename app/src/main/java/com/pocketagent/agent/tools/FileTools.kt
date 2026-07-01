@@ -1,6 +1,6 @@
 package com.pocketagent.agent.tools
 
-import com.pocketagent.bridge.TermuxBridge
+import com.pocketagent.cloud.CloudBridge
 import com.pocketagent.llm.ToolSpec
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -22,7 +22,7 @@ import javax.inject.Singleton
 
 @Singleton
 class FileReadTool @Inject constructor(
-    private val bridge: TermuxBridge
+    private val cloud: CloudBridge
 ) : AgentTool {
 
     override val name = "file_read"
@@ -61,11 +61,11 @@ class FileReadTool @Inject constructor(
         val startLine = obj["start_line"]?.jsonPrimitive?.intOrNull ?: 1
         val endLine = obj["end_line"]?.jsonPrimitive?.intOrNull ?: Int.MAX_VALUE
 
-        if (!bridge.state.isConnected) {
+        if (!cloud.state.isConnected) {
             return ToolResult.Error("Termux daemon not connected", "Start the daemon: `pocketagent-daemon` in Termux.")
         }
 
-        val result = bridge.readFile(pathStr)
+        val result = cloud.readFile(pathStr)
 
         val response = result.getOrElse { e ->
             return ToolResult.Error("Bridge error: ${e.message}", "Check Termux daemon is running.")
@@ -99,7 +99,7 @@ class FileReadTool @Inject constructor(
 
 @Singleton
 class FileWriteTool @Inject constructor(
-    private val bridge: TermuxBridge
+    private val cloud: CloudBridge
 ) : AgentTool {
 
     override val name = "file_write"
@@ -134,11 +134,11 @@ class FileWriteTool @Inject constructor(
         val content = obj["content"]?.jsonPrimitive?.content
             ?: return ToolResult.Error("Missing 'content' parameter", "Provide a 'content' field with the file contents.")
 
-        if (!bridge.state.isConnected) {
+        if (!cloud.state.isConnected) {
             return ToolResult.Error("Termux daemon not connected", "Start the daemon: `pocketagent-daemon` in Termux.")
         }
 
-        val result = bridge.writeFile(pathStr, content)
+        val result = cloud.writeFile(pathStr, content)
 
         val response = result.getOrElse { e ->
             return ToolResult.Error("Bridge error: ${e.message}", "Check Termux daemon is running.")
@@ -160,7 +160,7 @@ class FileWriteTool @Inject constructor(
 
 @Singleton
 class FileListTool @Inject constructor(
-    private val bridge: TermuxBridge
+    private val cloud: CloudBridge
 ) : AgentTool {
 
     override val name = "file_list"
@@ -187,11 +187,11 @@ class FileListTool @Inject constructor(
         val obj = arguments as? JsonObject ?: JsonObject(emptyMap())
         val pathStr = obj["path"]?.jsonPrimitive?.content ?: "~"
 
-        if (!bridge.state.isConnected) {
+        if (!cloud.state.isConnected) {
             return ToolResult.Error("Termux daemon not connected", "Start the daemon: `pocketagent-daemon` in Termux.")
         }
 
-        val result = bridge.listFiles(pathStr)
+        val result = cloud.listFiles(pathStr)
 
         val response = result.getOrElse { e ->
             return ToolResult.Error("Bridge error: ${e.message}", "Check Termux daemon is running.")

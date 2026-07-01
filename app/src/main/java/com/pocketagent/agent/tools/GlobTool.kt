@@ -1,6 +1,6 @@
 package com.pocketagent.agent.tools
 
-import com.pocketagent.bridge.TermuxBridge
+import com.pocketagent.cloud.CloudBridge
 import com.pocketagent.llm.ToolSpec
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -18,7 +18,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class GlobTool @Inject constructor(
-    private val bridge: TermuxBridge
+    private val cloud: CloudBridge
 ) : AgentTool {
 
     override val name = "glob"
@@ -39,7 +39,7 @@ class GlobTool @Inject constructor(
             ?: return ToolResult.Error("Missing 'pattern'", "Provide a 'pattern' field.")
         val pathStr = obj["path"]?.jsonPrimitive?.contentOrNull ?: "."
 
-        if (!bridge.state.isConnected) {
+        if (!cloud.state.isConnected) {
             return ToolResult.Error("Termux daemon not connected", "Start the daemon: `pocketagent-daemon` in Termux.")
         }
 
@@ -64,7 +64,7 @@ class GlobTool @Inject constructor(
             append("echo \"\$mtime|\$f\"; done | sort -rn | cut -d'|' -f2-")
         }
 
-        val result = bridge.exec(cmd, timeout = 30)
+        val result = cloud.exec(cmd, timeout = 30)
         val response = result.getOrElse { e ->
             return ToolResult.Error("Bridge error: ${e.message}", "Check Termux daemon is running.")
         }

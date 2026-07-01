@@ -3,7 +3,7 @@ package com.pocketagent.agent.tools
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import com.pocketagent.bridge.TermuxBridge
+import com.pocketagent.cloud.CloudBridge
 import com.pocketagent.llm.ToolSpec
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -28,7 +28,7 @@ import javax.inject.Singleton
 @Singleton
 class InstallApkTool @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val bridge: TermuxBridge
+    private val cloud: CloudBridge
 ) : AgentTool {
 
     override val name = "install_apk"
@@ -60,12 +60,12 @@ class InstallApkTool @Inject constructor(
         val pathStr = obj["path"]?.jsonPrimitive?.contentOrNull
             ?: return ToolResult.Error("Missing 'path'", "Provide a 'path' field with the APK location.")
 
-        if (!bridge.state.isConnected) {
+        if (!cloud.state.isConnected) {
             return ToolResult.Error("Termux daemon not connected", "Start the daemon: `pocketagent-daemon` in Termux.")
         }
 
         // Stat the file via the daemon
-        val statResult = bridge.statFile(pathStr)
+        val statResult = cloud.statFile(pathStr)
         val stat = statResult.getOrElse { e ->
             return ToolResult.Error("Bridge error: ${e.message}", "Check Termux daemon is running.")
         }
@@ -83,7 +83,7 @@ class InstallApkTool @Inject constructor(
         }
 
         // Download the APK from Termux to the app's cache dir
-        val readResult = bridge.readFile(pathStr)
+        val readResult = cloud.readFile(pathStr)
         val readResp = readResult.getOrElse { e ->
             return ToolResult.Error("Failed to read APK: ${e.message}", "Check the file is readable.")
         }
