@@ -14,6 +14,8 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -761,18 +763,27 @@ private fun ToolCallCard(
                 )
             }
             AnimatedVisibility(visible = expanded) {
-                Column(modifier = Modifier.padding(top = 6.dp)) {
+                // v4.8: Terminal-style output — black bg, monospace, green/red text
+                Column(
+                    modifier = Modifier
+                        .padding(top = 6.dp)
+                        .fillMaxWidth()
+                        .background(Color(0xFF1a1a1a), RoundedCornerShape(6.dp))
+                        .padding(8.dp)
+                ) {
                     if (display != null) {
                         Text(
                             text = display,
                             style = PocketType.CodeSmall,
-                            color = ext.textSecondary
+                            color = Color(0xFF00FF41),  // terminal green
+                            modifier = Modifier.horizontalScroll(rememberScrollState())
                         )
                     } else if (result != null) {
                         Text(
                             text = result,
                             style = PocketType.CodeSmall,
-                            color = ext.textSecondary
+                            color = Color(0xFF00FF41),
+                            modifier = Modifier.horizontalScroll(rememberScrollState())
                         )
                     }
                 }

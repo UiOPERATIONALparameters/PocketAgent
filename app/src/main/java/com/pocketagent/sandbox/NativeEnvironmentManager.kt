@@ -689,6 +689,8 @@ Description: Pre-installed by PocketAgent"""
             APT::Architecture "$arch";
             Acquire::Languages "none";
             APT::Install-Recommends "0";
+            DPkg::Post-Invoke { "unset LD_PRELOAD"; };
+            DPkg::Pre-Install-Pkgs { "unset LD_PRELOAD"; };
             APT::Get::AllowUnauthenticated "true";
         """.trimIndent())
 
@@ -955,11 +957,27 @@ Description: Pre-installed by PocketAgent"""
 
             // Create wrapper script
             val wrapper = File(binDir, cmd)
-            wrapper.writeText("""#!$bashPath
+
+            // v4.8: For dpkg, UNSET LD_PRELOAD before running — maintainer scripts
+            // (postinst, preinst) trigger seccomp (signal 31) when LD_PRELOAD is set.
+            // dpkg itself doesn't need termux-exec; only interactive shells do.
+            if (cmd == "dpkg" || cmd == "apt" || cmd == "apt-get") {
+                wrapper.writeText("""#!$bashPath
+# PocketAgent wrapper for $cmd — sets up environment, then UNSETS LD_PRELOAD
+# to prevent seccomp (signal 31) from killing maintainer scripts
+$envSetup
+# v4.8: Unset LD_PRELOAD — dpkg/apt don't need termux-exec path rewriting
+# and maintainer scripts (postinst/preinst) trigger seccomp when it's set
+unset LD_PRELOAD
+exec "${realFile.absolutePath}" "$@"
+""".trimIndent())
+            } else {
+                wrapper.writeText("""#!$bashPath
 # PocketAgent wrapper for $cmd — sets up full environment before calling $cmd.real
 $envSetup
 exec "${realFile.absolutePath}" "$@"
 """.trimIndent())
+            }
             wrapper.setExecutable(true, true)
             wrapper.setReadable(true, true)
         }
