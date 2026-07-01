@@ -1,16 +1,16 @@
-name: Build APK
+name: Build APK v6
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, v6-termux-bridge ]
     tags: [ 'v*' ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, v6-termux-bridge ]
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build Release APK
+    name: Build APK
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -37,64 +37,20 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/libs.versions.toml', 'gradle.properties') }}
+          key: ${{ runner.os }}-gradle-v6-${{ hashFiles('**/*.gradle*', '**/libs.versions.toml', 'gradle.properties') }}
           restore-keys: |
-            ${{ runner.os }}-gradle-
+            ${{ runner.os }}-gradle-v6-
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build debug APK (for non-release)
+      - name: Build debug APK (for branch pushes and PRs)
         if: github.ref_type != 'tag'
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Build release APK (for tags)
         if: github.ref_type == 'tag'
-        run: ./gradlew assembleRelease
-
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: pocketagent-apk
-          path: |
-            app/build/outputs/apk/debug/*.apk
-            app/build/outputs/apk/release/*.apk
-          if-no-files-found: ignore
-          retention-days: 30
-
-      - name: Create GitHub Release on tag
-        if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            app/build/outputs/apk/release/*.apk
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-          body: |
-            # PocketAgent ${{ github.ref_name }}
-
-            ## Install
-
-            1. Download the APK file below
-            2. On your Android phone, open the APK file
-            3. If prompted, allow "Install unknown apps" for your file manager
-            4. Tap Install
-
-            ## What's new
-
-            - Initial release
-            - BYOK: connect any OpenAI-compatible gateway
-            - Streaming chat with reasoning support
-            - Agent loop with bash, file_read, file_write, file_list, web_fetch tools
-            - Sandboxed workspace at /data/data/com.pocketagent/files/workspace/
-            - iOS-clean Kimi-inspired UI
-            - Dark mode (system-follow)
-            - Encrypted API key storage (Android Keystore)
-
-            SHA-256 checksums are in the release assets.
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: Generate SHA256 checksums
         if: github.ref_type == 'tag'
@@ -104,10 +60,69 @@ jobs:
             sha256sum "$f" > "${f}.sha256"
           done
 
-      - name: Upload checksums
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocketagent-v6-apk
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/release/*.sha256
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Create GitHub Release on tag
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/release/*.sha256
+          files: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/release/*.sha256
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            # PocketAgent ${{ github.ref_name }}
+
+            ## What's new in v6
+
+            **Major architectural overhaul.** PocketAgent v6 abandons the broken "be Termux" approach (1,185 lines of `NativeEnvironmentManager` patching hardcoded ELF paths, fighting Android's seccomp and W^X) and instead **uses your real Termux** via a tiny HTTP daemon.
+
+            ### Breaking changes from v5
+            - `applicationId` is back to `com.pocketagent` — coexists with real Termux
+            - New setup required: install the daemon in Termux (one-line curl command)
+            - Old v5 Linux environment must be removed (Settings → Reset)
+
+            ### What's new
+            - **Use Termux, don't be Termux** — 1,185 lines of `NativeEnvironmentManager` deleted, replaced by ~250 lines of HTTP/JSON
+            - **Real Termux environment** — AI gets your exact same packages, $PATH, git config, ssh keys
+            - **Subagent manager** — `task` tool spawns real subagents with their own context (z.ai Task tool pattern)
+            - **Context compaction** — auto-compacts at 70% of context window, with `compact` tool for manual triggering
+            - **Persistent scratchpad** — `state` tool + `~/.pocketagent/scratchpad.md` survive across sessions
+            - **Worklog** — every task appended to `~/.pocketagent/worklog.md` and injected into new conversations
+            - **Structured tool errors** — every error returns a `suggestion` field with actionable advice
+            - **Monochrome/eink UI** — calm, focused, paper-like aesthetic
+            - **17 tools** (was 15): added `compact`, `task`, `state`
+
+            ### Install (one-time setup, ~2 minutes)
+
+            1. Install Termux from [F-Droid](https://f-droid.org/en/packages/com.termux/) (NOT Play Store — that version is deprecated)
+            2. Open Termux and run:
+               ```bash
+               curl -sL https://raw.githubusercontent.com/UiOPERATIONALparameters/PocketAgent/v6-termux-bridge/termux-daemon/install.sh | bash
+               ```
+            3. The installer prints a token — copy it
+            4. Open PocketAgent → Settings → paste the token
+            5. Tap "Reconnect" — should show "Connected to Termux"
+
+            ### Migration from v5
+
+            If you had v5 installed:
+            - The v5 Linux environment at `/data/data/com.termux/files/usr/` is unused by v6
+            - Uninstall v5 first (or just install v6 over it — different applicationId means side-by-side works)
+            - Your conversations are migrated automatically (DB schema v2 → v3)
+
+            ### SHA256 checksums
+            See the `.sha256` files in the release assets.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

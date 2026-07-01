@@ -1,7 +1,7 @@
 package com.pocketagent.agent.tools
 
+import com.pocketagent.bridge.TermuxBridge
 import com.pocketagent.llm.ToolSpec
-import com.pocketagent.sandbox.ShellExecutor
 import com.pocketagent.storage.prefs.SettingsRepository
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -15,29 +15,47 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * bash tool — runs a shell command in the agent's workspace.
+ * bash tool — runs a shell command via the Termux daemon.
  *
- * Mirrors Anthropic's Claude Computer Use bash tool schema so any model
- * trained on that spec works zero-shot.
+ * v6: Replaced the entire ShellExecutor + NativeEnvironmentManager (~1,500 LOC of
+ * Android-OS-fighting code) with a single HTTP call to the Termux daemon.
  *
- * Verified working with GLM 5.2 via standard OpenAI-compatible gateways.
+ * The AI gets the EXACT same environment the user has in Termux:
+ *   - Same $PATH, same installed packages
+ *   - Same ~/.gitconfig, same ssh keys
+ *   - Same ~/.bashrc, same aliases
+ *   - Real bash, real coreutils, real apt/pkg
+ *
+ * Tool design (Anthropic "Writing Effective Tools" principles):
+ *   - Structured JSON output (stdout, stderr, exit_code, suggestion)
+ *   - Actionable error suggestions
+ *   - Even on failure, returns Success with the output (the LLM needs to see stderr)
  */
 @Singleton
 class BashTool @Inject constructor(
-    private val shell: ShellExecutor,
+    private val bridge: TermuxBridge,
     private val settings: SettingsRepository
 ) : AgentTool {
 
     override val name = "bash"
     override val description = """
-        Run a bash command in the agent's workspace (~/).
-        The workspace is a private Linux environment on the user's phone.
-        Available commands include: cd, ls, cat, echo, mkdir, rm, cp, mv, ln, chmod,
-        find, grep, sed, awk, head, tail, wc, sort, uniq, tr, cut, curl, wget, git,
-        python3, node, npm, pip, tar, gzip, unzip, and many more.
-        You can install additional packages with: pkg install <package> or apt install <package>
-        The workspace has 'projects', 'tmp', and 'downloads' subdirectories.
-        Commands run with a configurable timeout (default 30s, max 120s).
+        Run a bash command in the agent's Termux environment (real Linux on the user's phone).
+        This is the user's actual Termux — same packages, same $PATH, same git config.
+
+        Available commands (everything the user has in Termux):
+        - coreutils: ls, cat, echo, mkdir, rm, cp, mv, ln, chmod, find, head, tail, wc, sort, uniq, tr, cut
+        - shells: bash, sh, zsh (if installed)
+        - languages: python, python3, node, ruby, perl, php (if installed)
+        - build: gcc, g++, clang, make, cmake, gradle, javac (if installed)
+        - network: curl, wget, ssh, scp, git
+        - package manager: pkg, apt, apt-get
+        - editors: vim, nano (if installed)
+
+        Install new packages with: pkg install <name>
+        Examples: pkg install python nodejs git gcc ffmpeg
+
+        The workspace is the user's $HOME in Termux. All commands run there.
+        Commands run with a configurable timeout (default 30s, max 600s).
     """.trimIndent()
 
     override val parametersSchema = """
@@ -50,8 +68,13 @@ class BashTool @Inject constructor(
             },
             "timeout": {
               "type": "integer",
-              "description": "Optional timeout in seconds (default 30, max 120)",
+              "description": "Optional timeout in seconds (default 30, max 600)",
               "default": 30
+            },
+            "cwd": {
+              "type": "string",
+              "description": "Optional working directory (default: $HOME)",
+              "default": "~"
             }
           },
           "required": ["command"]
@@ -64,49 +87,69 @@ class BashTool @Inject constructor(
         val obj = arguments as? JsonObject
             ?: return ToolResult.Error("Arguments must be a JSON object")
         val command = obj["command"]?.jsonPrimitive?.content
-            ?: return ToolResult.Error("Missing 'command' parameter")
-        // Use user-configured timeout as the default; model can override up to it
+            ?: return ToolResult.Error("Missing 'command' parameter", "Provide a 'command' field with the bash command to run.")
         val userMaxTimeout = settings.settings.value.bashCommandTimeoutSec
         val requestedTimeout = obj["timeout"]?.jsonPrimitive?.intOrNull ?: userMaxTimeout
         val timeout = requestedTimeout.coerceIn(1, 600)
+        val cwd = obj["cwd"]?.jsonPrimitive?.content
 
-        val result = shell.execute(command, timeoutSec = timeout)
+        // Check connection first
+        if (!bridge.state.isConnected) {
+            return ToolResult.Error(
+                "Termux daemon not connected",
+                "Open Termux and run `pocketagent-daemon`, then retry. The daemon must be running for bash commands to work."
+            )
+        }
+
+        val result = bridge.exec(command, timeout = timeout, cwd = cwd)
+
+        val response = result.getOrElse { e ->
+            return ToolResult.Error(
+                "Bridge error: ${e.message}",
+                "The Termux daemon connection failed. Check that Termux is running and the daemon is started (pocketagent-daemon)."
+            )
+        }
+
+        // If daemon returned an error field, surface it
+        if (response.error != null) {
+            return ToolResult.Error(
+                response.error,
+                response.suggestion ?: "Check the command syntax and try again."
+            )
+        }
 
         val output = buildJsonObject {
-            put("stdout", result.stdout)
-            put("stderr", result.stderr)
-            put("exit_code", JsonPrimitive(result.exitCode))
-            put("duration_ms", JsonPrimitive(result.durationMs))
-            put("timed_out", JsonPrimitive(result.timedOut))
-            put("truncated", JsonPrimitive(result.truncated))
+            put("stdout", response.stdout)
+            put("stderr", response.stderr)
+            put("exit_code", JsonPrimitive(response.exitCode))
+            put("duration_ms", JsonPrimitive(response.durationMs))
+            put("timed_out", JsonPrimitive(response.timedOut))
+            put("truncated", JsonPrimitive(response.truncated))
+            response.pid?.let { put("pid", JsonPrimitive(it)) }
+            response.suggestion?.let { put("suggestion", JsonPrimitive(it)) }
         }
 
         val display = buildString {
             append("$ ")
             append(command)
             append("\n")
-            if (result.stdout.isNotEmpty()) {
-                append(result.stdout)
-                if (!result.stdout.endsWith("\n")) append("\n")
+            if (response.stdout.isNotEmpty()) {
+                append(response.stdout)
+                if (!response.stdout.endsWith("\n")) append("\n")
             }
-            if (result.stderr.isNotEmpty()) {
-                append(result.stderr)
-                if (!result.stderr.endsWith("\n")) append("\n")
+            if (response.stderr.isNotEmpty()) {
+                append(response.stderr)
+                if (!response.stderr.endsWith("\n")) append("\n")
             }
             append("exit ")
-            append(result.exitCode)
-            if (result.timedOut) append(" (timed out)")
+            append(response.exitCode)
+            if (response.timedOut) append(" (timed out)")
+            response.suggestion?.let { append("\n💡 $it") }
         }
 
-        return if (result.isSuccess) {
-            ToolResult.Success(output, display)
-        } else {
-            // C3 FIX: Even on failure, return Success with the output (the LLM needs to see
-            // the error in stderr to recover). But we differentiate the DISPLAY — the UI
-            // shows a red 'failed' chip when exit_code != 0. The JSON output's exit_code
-            // field is the source of truth for the LLM.
-            ToolResult.Success(output, display)
-        }
+        // Always return Success — the LLM needs to see stderr to recover.
+        // The exit_code field is the source of truth.
+        return ToolResult.Success(output, display)
     }
 
     fun toSpec(): ToolSpec = ToolSpec(

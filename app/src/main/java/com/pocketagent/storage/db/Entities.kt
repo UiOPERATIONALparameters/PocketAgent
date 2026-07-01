@@ -12,7 +12,12 @@ data class ConversationEntity(
     val createdAt: Long,
     val updatedAt: Long,
     val providerId: String?,
-    val modelId: String?
+    val modelId: String?,
+    // v6: subagent support
+    val parentId: String? = null,        // if this is a subagent, the parent conversation ID
+    val isSubagent: Boolean = false,     // true if this is a subagent conversation
+    val status: String = "active",       // active/completed/failed/cancelled (for subagents)
+    val summary: String? = null          // subagent final summary (set when complete)
 )
 
 @Entity(

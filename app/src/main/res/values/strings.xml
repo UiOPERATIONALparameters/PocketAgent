@@ -64,6 +64,25 @@
     <string name="error_network">Network error: %1$s</string>
     <string name="error_stream">Stream interrupted: %1$s</string>
 
+    <!-- v6: Termux bridge -->
+    <string name="termux_setup_title">Connect Termux</string>
+    <string name="termux_setup_subtitle">Your AI needs Termux to run commands. One-time setup.</string>
+    <string name="termux_install_step1">1. Install Termux from F-Droid</string>
+    <string name="termux_install_step2">2. In Termux, run the installer</string>
+    <string name="termux_install_step3">3. Paste the token here</string>
+    <string name="termux_install_command">curl -sL https://raw.githubusercontent.com/UiOPERATIONALparameters/PocketAgent/v6-termux-bridge/termux-daemon/install.sh | bash</string>
+    <string name="termux_status_connected">Connected to Termux</string>
+    <string name="termux_status_disconnected">Termux not connected</string>
+    <string name="termux_status_connecting">Connecting…</string>
+    <string name="termux_reconnect">Reconnect</string>
+    <string name="termux_open">Open Termux</string>
+    <string name="termux_token_hint">Paste token from ~/.pocketagent/token</string>
+
+    <!-- v6: New tools -->
+    <string name="tool_compact">compact</string>
+    <string name="tool_task">task</string>
+    <string name="tool_state">state</string>
+
     <!-- Misc -->
     <string name="cancel">Cancel</string>
     <string name="save">Save</string>

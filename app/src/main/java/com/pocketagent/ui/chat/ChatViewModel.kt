@@ -80,7 +80,9 @@ class ChatViewModel @Inject constructor(
     private val settings: SettingsRepository,
     private val activeProviderHolder: ActiveProviderHolder,
     private val agentLoop: AgentLoop,
-    private val toolRouter: ToolRouter
+    private val toolRouter: ToolRouter,
+    private val stateStore: com.pocketagent.agent.state.StateStore,
+    private val bridge: com.pocketagent.bridge.TermuxBridge
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ChatUiState())
@@ -305,6 +307,9 @@ class ChatViewModel @Inject constructor(
             // Track the current iteration's assistant message ID (for tool_calls persistence)
             var currentAssistantMsgId: String? = null
 
+            // v6: set the current conversation ID for the TaskTool (subagent spawning)
+            com.pocketagent.agent.tools.CurrentConversationHolder.set(conversationId)
+
             // Start foreground service to keep the app alive when backgrounded.
             // This prevents "stream was reset" errors when the user minimizes the app.
             startAgentService(text.ifEmpty { "Working…" })
@@ -469,6 +474,18 @@ class ChatViewModel @Inject constructor(
                                 conversationDao.getById(conversationId)?.let { conv ->
                                     conversationDao.update(conv.copy(updatedAt = System.currentTimeMillis()))
                                 }
+                                // v6: append to worklog (persistent across sessions)
+                                try {
+                                    stateStore.appendWorklog(
+                                        com.pocketagent.agent.state.StateStore.WorklogEntry(
+                                            title = text.take(60).ifBlank { "Task" },
+                                            body = content.take(500).ifBlank { "(no output)" },
+                                            agent = "main"
+                                        )
+                                    )
+                                } catch (_: Exception) {}
+                                // Clear the current conversation holder
+                                com.pocketagent.agent.tools.CurrentConversationHolder.set(null)
                                 _state.update {
                                     it.copy(
                                         isAgentRunning = false,
@@ -479,6 +496,14 @@ class ChatViewModel @Inject constructor(
                                     )
                                 }
                                 stopAgentService()
+                            }
+                            AgentLoop.Event.Type.COMPACTED -> {
+                                // Show compaction notice in UI
+                                _state.update {
+                                    it.copy(
+                                        streamingContent = it.streamingContent + "\n\n[" + event.content + "]\n\n"
+                                    )
+                                }
                             }
                             AgentLoop.Event.Type.ERROR -> {
                                 _state.update {

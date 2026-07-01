@@ -3,88 +3,96 @@ package com.pocketagent.design
 import androidx.compose.ui.graphics.Color
 
 /**
- * Color tokens extracted directly from Kimi's live DOM via headless browser inspection.
+ * v6 Color tokens — Monochrome / e-ink aesthetic.
  *
- * Key insights:
- * - Background is off-white #F9FBFC, not pure white. This is THE iOS-clean signature.
- * - Text is 90% opacity black (softer than pure black).
- * - Shadows are 3-7% opacity, two-layer (NOT Material's heavy 20% shadows).
+ * Design philosophy:
+ *   - Single accent (muted graphite black, no chromatic color)
+ *   - Pure grayscale palette for everything else
+ *   - High contrast for text legibility (the e-ink feel)
+ *   - Soft off-white background (paper-like)
+ *   - No bright colors except for status indicators (kept subdued)
+ *
+ * The goal: a calm, focused interface that feels like reading paper.
+ * Inspiration: Kindle, Readwise, Bear app, iA Writer.
  */
 
-// Light theme - verified against Kimi's DOM
-val KimiBg = Color(0xFFF9FBFC)           // rgb(249, 251, 252) - page background
-val KimiSurface = Color(0xFFFFFFFF)       // pure white - composer/cards
-val KimiSurfaceRaised = Color(0xFFFFFFFF) // pure white, elevated
-val KimiSurfaceSubtle = Color(0xFFF1F4F6) // very subtle hover/selected state
-val KimiDivider = Color(0xFFE8ECEE)       // hairline dividers
+// ─── Light (paper) theme ──────────────────────────────────────────
+// Off-white #FAFAF7 — slight warm tint, like aged paper
+val InkBg = Color(0xFFFAFAF7)
+val InkSurface = Color(0xFFFFFFFF)
+val InkSurfaceRaised = Color(0xFFFFFFFF)
+val InkSurfaceSubtle = Color(0xFFF2F2EE)         // subtle hover/selected
+val InkDivider = Color(0xFFE5E5E0)               // hairline dividers
 
-val KimiTextPrimary = Color(0xE6000000.toInt())    // 90% black
-val KimiTextSecondary = Color(0x99000000.toInt())  // 60% black - placeholders
-val KimiTextTertiary = Color(0x66000000.toInt())   // 40% black - hints
-val KimiTextOnAccent = Color(0xFFFFFFFF)            // white on accent
+// Text — pure black with opacity for hierarchy
+val InkTextPrimary = Color(0xFF1A1A1A)           // near-black, high contrast
+val InkTextSecondary = Color(0xFF525252)         // 60% black
+val InkTextTertiary = Color(0xFF8A8A8A)          // 40% black
+val InkTextOnAccent = Color(0xFFFAFAF7)          // paper-white on accent
 
-// User message bubble - slightly darker than surface, like iMessage
-val KimiBubbleUser = Color(0xFF0A8C7A)              // refined teal accent
-val KimiBubbleUserText = Color(0xFFFFFFFF)
+// User message bubble — solid graphite, inverted
+val InkBubbleUser = Color(0xFF1A1A1A)
+val InkBubbleUserText = Color(0xFFFAFAF7)
 
-// Agent message - transparent, sits on background
-val KimiBubbleAgent = Color(0x00000000)             // transparent
-val KimiBubbleAgentText = KimiTextPrimary
+// Agent message — transparent, sits on background
+val InkBubbleAgent = Color(0x00000000)
+val InkBubbleAgentText = InkTextPrimary
 
-// Tool call card - subtle surface tint
-val KimiToolCardBg = Color(0xFFF6F8FA)
-val KimiToolCardBorder = Color(0xFFE8ECEE)
+// Tool call card — subtle gray
+val InkToolCardBg = Color(0xFFF6F6F2)
+val InkToolCardBorder = Color(0xFFE5E5E0)
 
-// Accent (refined teal, slightly darker than ChatGPT's for premium feel)
-val KimiAccent = Color(0xFF0A8C7A)
-val KimiAccentPressed = Color(0xFF07715F)
-val KimiAccentMuted = Color(0x1A0A8C7A)  // 10% accent for backgrounds
+// Accent — single graphite black, no chromatic accent
+val InkAccent = Color(0xFF1A1A1A)
+val InkAccentPressed = Color(0xFF000000)
+val InkAccentMuted = Color(0xFFE5E5E0)
 
-// Status colors (kept muted to match aesthetic)
-val KimiSuccess = Color(0xFF16A34A)
-val KimiError = Color(0xFFDC2626)
-val KimiWarning = Color(0xFFD97706)
-val KimiInfo = Color(0xFF2563EB)
+// Status — kept subdued, still distinguishable
+val InkSuccess = Color(0xFF4A7C5C)               // muted forest green
+val InkError = Color(0xFFA04545)                 // muted brick red
+val InkWarning = Color(0xFF8A6D3B)               // muted amber
+val InkInfo = Color(0xFF4A6A8A)                  // muted slate blue
 
-// Code blocks
-val KimiCodeBg = Color(0xFFF6F8FA)
-val KimiCodeText = Color(0xFF1F2328)
-val KimiCodeKeyword = Color(0xFFCF222E)
-val KimiCodeString = Color(0xFF0A8C7A)
-val KimiCodeComment = Color(0xFF6E7781)
+// Code blocks — slightly different bg
+val InkCodeBg = Color(0xFFF2F2EE)
+val InkCodeText = Color(0xFF1A1A1A)
+val InkCodeKeyword = Color(0xFF525252)
+val InkCodeString = Color(0xFF1A1A1A)
+val InkCodeComment = Color(0xFF8A8A8A)
 
-// Dark theme - hand-crafted to preserve the off-white-on-dark contrast ratio
-val KimiBgDark = Color(0xFF000000)                  // true black
-val KimiSurfaceDark = Color(0xFF0E0E10)             // very dark surface
-val KimiSurfaceRaisedDark = Color(0xFF161618)       // elevated
-val KimiSurfaceSubtleDark = Color(0xFF1C1C1F)       // hover/selected
-val KimiDividerDark = Color(0xFF26262A)
+// ─── Dark (e-ink dark / OLED-friendly) theme ──────────────────────
+// True black for OLED screens
+val InkBgDark = Color(0xFF000000)
+val InkSurfaceDark = Color(0xFF0A0A0A)
+val InkSurfaceRaisedDark = Color(0xFF141414)
+val InkSurfaceSubtleDark = Color(0xFF1A1A1A)
+val InkDividerDark = Color(0xFF262626)
 
-val KimiTextPrimaryDark = Color(0xE6FFFFFF.toInt())   // 90% white
-val KimiTextSecondaryDark = Color(0x99FFFFFF.toInt()) // 60% white
-val KimiTextTertiaryDark = Color(0x66FFFFFF.toInt())  // 40% white
-val KimiTextOnAccentDark = Color(0xFFFFFFFF)
+val InkTextPrimaryDark = Color(0xFFE5E5E5)       // off-white, easier than pure
+val InkTextSecondaryDark = Color(0xFFA0A0A0)
+val InkTextTertiaryDark = Color(0xFF666666)
+val InkTextOnAccentDark = Color(0xFF000000)
 
-val KimiBubbleUserDark = Color(0xFF0A8C7A)
-val KimiBubbleUserTextDark = Color(0xFFFFFFFF)
+val InkBubbleUserDark = Color(0xFFE5E5E5)
+val InkBubbleUserTextDark = Color(0xFF000000)
 
-val KimiBubbleAgentDark = Color(0x00000000)
-val KimiBubbleAgentTextDark = KimiTextPrimaryDark
+val InkBubbleAgentDark = Color(0x00000000)
+val InkBubbleAgentTextDark = InkTextPrimaryDark
 
-val KimiToolCardBgDark = Color(0xFF161618)
-val KimiToolCardBorderDark = Color(0xFF26262A)
+val InkToolCardBgDark = Color(0xFF141414)
+val InkToolCardBorderDark = Color(0xFF262626)
 
-val KimiAccentDark = Color(0xFF14B8A6)              // slightly brighter for dark bg
-val KimiAccentPressedDark = Color(0xFF0D9488)
-val KimiAccentMutedDark = Color(0x2614B8A6)
+val InkAccentDark = Color(0xFFE5E5E5)
+val InkAccentPressedDark = Color(0xFFFFFFFF)
+val InkAccentMutedDark = Color(0xFF262626)
 
-val KimiSuccessDark = Color(0xFF22C55E)
-val KimiErrorDark = Color(0xFFEF4444)
-val KimiWarningDark = Color(0xFFF59E0B)
-val KimiInfoDark = Color(0xFF3B82F6)
+val InkSuccessDark = Color(0xFF6FA886)
+val InkErrorDark = Color(0xFFC77878)
+val InkWarningDark = Color(0xFFB89968)
+val InkInfoDark = Color(0xFF7898B8)
 
-val KimiCodeBgDark = Color(0xFF161618)
-val KimiCodeTextDark = Color(0xFFE6EDF3)
-val KimiCodeKeywordDark = Color(0xFFFF7B72)
-val KimiCodeStringDark = Color(0xFF7EE787)
-val KimiCodeCommentDark = Color(0xFF8B949E)
+val InkCodeBgDark = Color(0xFF141414)
+val InkCodeTextDark = Color(0xFFE5E5E5)
+val InkCodeKeywordDark = Color(0xFFA0A0A0)
+val InkCodeStringDark = Color(0xFFE5E5E5)
+val InkCodeCommentDark = Color(0xFF666666)

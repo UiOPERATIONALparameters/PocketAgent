@@ -18,9 +18,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import android.widget.Toast
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -42,7 +40,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pocketagent.design.PocketType
 import com.pocketagent.design.extendedColors
-import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -54,9 +51,7 @@ fun FileBrowserScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val ext = extendedColors()
-    val context = androidx.compose.ui.platform.LocalContext.current
     val dateFormat = remember { SimpleDateFormat("MMM d, yyyy HH:mm", Locale.getDefault()) }
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     Box(
         modifier = Modifier
@@ -95,37 +90,17 @@ fun FileBrowserScreen(
                 }
             }
 
-            // Storage usage bar
-            val usedMb = state.totalUsedBytes / (1024 * 1024)
-            val pct = (state.totalUsedBytes.toFloat() / (state.quotaMb * 1024 * 1024)).coerceIn(0f, 1f)
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+            // Connection status (v6)
+            if (!state.isConnected) {
+                Surface(
+                    color = ext.error,
+                    modifier = Modifier.fillMaxWidth().padding(16.dp, 8.dp)
                 ) {
                     Text(
-                        "Storage",
-                        style = PocketType.Label,
-                        color = ext.textSecondary
-                    )
-                    Text(
-                        "$usedMb MB / ${state.quotaMb} MB",
-                        style = PocketType.Label,
-                        color = ext.textSecondary
-                    )
-                }
-                Spacer(Modifier.height(4.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(4.dp)
-                        .background(ext.divider, RoundedCornerShape(2.dp))
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(pct)
-                            .height(4.dp)
-                            .background(ext.accent, RoundedCornerShape(2.dp))
+                        "Termux not connected. Open Termux and run pocketagent-daemon.",
+                        style = PocketType.Body,
+                        color = ext.textOnAccent,
+                        modifier = Modifier.padding(12.dp)
                     )
                 }
             }
@@ -239,25 +214,6 @@ fun FileBrowserScreen(
                                 }
                             }
                             if (!entry.isDirectory) {
-                                // M20 FIX: Save to Downloads via MediaStore (was using share sheet)
-                                IconButton(onClick = {
-                                    val path = entry.path
-                                    scope.launch {
-                                        val result = viewModel.saveToDownloads(path, context)
-                                        if (result != null) {
-                                            Toast.makeText(context, "Saved to Downloads: ${entry.name}", Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            Toast.makeText(context, "Failed to save ${entry.name}", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                }) {
-                                    Icon(
-                                        Icons.Filled.Download,
-                                        contentDescription = "Save to Downloads",
-                                        tint = ext.accent,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
                                 // Delete button
                                 IconButton(onClick = { viewModel.deleteFile(entry.path) }) {
                                     Icon(

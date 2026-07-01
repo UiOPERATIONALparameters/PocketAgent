@@ -2,8 +2,9 @@ package com.pocketagent.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.pocketagent.bridge.BridgeState
+import com.pocketagent.bridge.TermuxBridge
 import com.pocketagent.llm.ModelInfo
-import com.pocketagent.sandbox.NativeEnvironmentManager
 import com.pocketagent.storage.ActiveProviderHolder
 import com.pocketagent.storage.prefs.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -31,19 +32,22 @@ data class SettingsUiState(
     val workspaceQuotaMb: Int = 2048,
     val maxToolIterations: Int = 50,
     val tokenSaveMode: Boolean = false,
-    val linuxInstalled: Boolean = false,
-    val linuxInstalling: Boolean = false,
-    val linuxProgress: Float = 0f,
-    val linuxStatus: String = "",
-    val linuxAbi: String = "",
-    val disabledSkills: String = ""
+    val disabledSkills: String = "",
+    // v6: Termux bridge state
+    val termuxConnected: Boolean = false,
+    val termuxVersion: String? = null,
+    val termuxUser: String? = null,
+    val termuxToken: String = "",
+    val autoCompactThreshold: Float = 0.7f,
+    val enableSubagents: Boolean = true,
+    val focusMode: Boolean = true
 )
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val providerHolder: ActiveProviderHolder,
-    private val nativeEnv: NativeEnvironmentManager
+    private val bridge: TermuxBridge
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsUiState())
@@ -54,7 +58,6 @@ class SettingsViewModel @Inject constructor(
             settingsRepository.load()
             val provider = settingsRepository.getActiveProvider()
             val s = settingsRepository.settings.value
-            val abi = NativeEnvironmentManager.detectAbi()
             if (provider != null) {
                 _state.update {
                     it.copy(
@@ -68,8 +71,10 @@ class SettingsViewModel @Inject constructor(
                         workspaceQuotaMb = s.workspaceQuotaMb,
                         maxToolIterations = s.maxToolIterations,
                         tokenSaveMode = s.tokenSaveMode,
-                        linuxInstalled = nativeEnv.isInstalled(),
-                        linuxAbi = abi
+                        termuxToken = s.termuxToken,
+                        autoCompactThreshold = s.autoCompactThreshold,
+                        enableSubagents = s.enableSubagents,
+                        focusMode = s.focusMode
                     )
                 }
                 refreshModels()
@@ -81,9 +86,23 @@ class SettingsViewModel @Inject constructor(
                         workspaceQuotaMb = s.workspaceQuotaMb,
                         maxToolIterations = s.maxToolIterations,
                         tokenSaveMode = s.tokenSaveMode,
-                        linuxInstalled = nativeEnv.isInstalled(),
-                        linuxAbi = abi
+                        termuxToken = s.termuxToken,
+                        autoCompactThreshold = s.autoCompactThreshold,
+                        enableSubagents = s.enableSubagents,
+                        focusMode = s.focusMode
                     )
+                }
+            }
+            // Observe bridge state
+            launch {
+                bridge.state.state.collect { bs ->
+                    _state.update {
+                        it.copy(
+                            termuxConnected = bs.status == BridgeState.Status.CONNECTED,
+                            termuxVersion = bs.daemonVersion,
+                            termuxUser = bs.termuxUser
+                        )
+                    }
                 }
             }
         }
@@ -98,6 +117,10 @@ class SettingsViewModel @Inject constructor(
     fun onMaxIterationsChange(iterations: Int) = _state.update { it.copy(maxToolIterations = iterations) }
     fun onTokenSaveModeChange(enabled: Boolean) = _state.update { it.copy(tokenSaveMode = enabled) }
     fun onDisabledSkillsChange(skills: String) = _state.update { it.copy(disabledSkills = skills) }
+    fun onTermuxTokenChange(token: String) = _state.update { it.copy(termuxToken = token) }
+    fun onAutoCompactThresholdChange(v: Float) = _state.update { it.copy(autoCompactThreshold = v) }
+    fun onEnableSubagentsChange(v: Boolean) = _state.update { it.copy(enableSubagents = v) }
+    fun onFocusModeChange(v: Boolean) = _state.update { it.copy(focusMode = v) }
 
     suspend fun save() {
         val s = _state.value
@@ -176,6 +199,38 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun saveTermuxToken() {
+        viewModelScope.launch {
+            settingsRepository.updateSettings { it.copy(termuxToken = _state.value.termuxToken.trim()) }
+            // Test the connection
+            bridge.refreshState()
+        }
+    }
+
+    fun saveAutoCompactThreshold() {
+        viewModelScope.launch {
+            settingsRepository.updateSettings { it.copy(autoCompactThreshold = _state.value.autoCompactThreshold) }
+        }
+    }
+
+    fun saveEnableSubagents() {
+        viewModelScope.launch {
+            settingsRepository.updateSettings { it.copy(enableSubagents = _state.value.enableSubagents) }
+        }
+    }
+
+    fun saveFocusMode() {
+        viewModelScope.launch {
+            settingsRepository.updateSettings { it.copy(focusMode = _state.value.focusMode) }
+        }
+    }
+
+    fun refreshTermuxConnection() {
+        viewModelScope.launch {
+            bridge.refreshState()
+        }
+    }
+
     fun clearTestResult() {
         _state.update { it.copy(testResult = null) }
     }
@@ -194,75 +249,6 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    /**
-     * v3.0: Install the native Linux environment (Termux bootstrap).
-     * No proot — runs natively via Android's linker.
-     */
-    fun installLinux() {
-        if (_state.value.linuxInstalling) return
-
-        if (!nativeEnv.hasEnoughStorage(200)) {
-            _state.update {
-                it.copy(linuxStatus = "Not enough free storage. Need at least 200MB free.")
-            }
-            return
-        }
-
-        _state.update {
-            it.copy(
-                linuxInstalling = true,
-                linuxProgress = 0f,
-                linuxStatus = "Starting installation..."
-            )
-        }
-        viewModelScope.launch {
-            val result = nativeEnv.install { status, downloaded, total ->
-                if (total > 0) {
-                    val pct = downloaded.toFloat() / total
-                    _state.update {
-                        it.copy(
-                            linuxProgress = pct,
-                            linuxStatus = "$status ${(pct * 100).toInt()}%"
-                        )
-                    }
-                } else {
-                    _state.update {
-                        it.copy(linuxStatus = status)
-                    }
-                }
-            }
-            if (result.isSuccess) {
-                _state.update {
-                    it.copy(
-                        linuxInstalling = false,
-                        linuxInstalled = true,
-                        linuxProgress = 1f,
-                        linuxStatus = "Linux installed! The AI now has full bash + apt + pkg access."
-                    )
-                }
-            } else {
-                _state.update {
-                    it.copy(
-                        linuxInstalling = false,
-                        linuxStatus = "Failed: ${result.exceptionOrNull()?.message ?: "unknown error"}"
-                    )
-                }
-            }
-        }
-    }
-
-    fun uninstallLinux() {
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) { nativeEnv.uninstall() }
-            _state.update {
-                it.copy(
-                    linuxInstalled = false,
-                    linuxStatus = "Linux environment removed."
-                )
-            }
-        }
-    }
-
     fun clearAllKeys() {
         viewModelScope.launch {
             val providers = settingsRepository.providers.value
@@ -273,9 +259,7 @@ class SettingsViewModel @Inject constructor(
                     versionName = com.pocketagent.BuildConfig.VERSION_NAME,
                     systemPrompt = it.systemPrompt,
                     bashTimeoutSec = it.bashTimeoutSec,
-                    workspaceQuotaMb = it.workspaceQuotaMb,
-                    linuxInstalled = it.linuxInstalled,
-                    linuxAbi = it.linuxAbi
+                    workspaceQuotaMb = it.workspaceQuotaMb
                 )
             }
         }

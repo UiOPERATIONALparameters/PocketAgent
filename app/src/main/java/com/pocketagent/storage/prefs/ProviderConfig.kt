@@ -35,7 +35,12 @@ data class AppSettings(
     val systemPrompt: String = "",          // empty = use default from AgentLoop
     val maxToolIterations: Int = 50,        // H2: max tool calls per turn (5-100); was 30, too low for build tasks
     val tokenSaveMode: Boolean = false,     // H3: if true, truncate results + skip reasoning
-    val disabledSkills: String = ""            // v4.3: comma-separated list of disabled skills (saves tokens)
+    val disabledSkills: String = "",            // v4.3: comma-separated list of disabled skills (saves tokens)
+    // v6: Termux bridge settings
+    val termuxToken: String = "",               // v6: auth token for ~/.pocketagent/token
+    val autoCompactThreshold: Float = 0.7f,     // v6: auto-compact at 70% of context window
+    val enableSubagents: Boolean = true,        // v6: allow task() tool to spawn subagents
+    val focusMode: Boolean = true               // v6: eink-style low-contrast theme
 ) {
     enum class ThemeMode { SYSTEM, LIGHT, DARK }
 }

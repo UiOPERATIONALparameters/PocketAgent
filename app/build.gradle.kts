@@ -12,23 +12,17 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        // v4.0 CRITICAL: applicationId MUST be "com.termux" so that the data directory
-        // is /data/data/com.termux/files/ — this makes ALL hardcoded paths in Termux
-        // binaries match exactly. No LD_PRELOAD, no path rewriting, no wrappers needed.
-        // The namespace stays "com.pocketagent" so we don't need to rename source files.
-        applicationId = "com.termux"
+        // v6: Restored applicationId to com.pocketagent — no longer hijacking com.termux.
+        // The app now talks to the user's real Termux via HTTP daemon on localhost:8765.
+        // This means the app coexists with real Termux, and updates flow through `pkg upgrade`.
+        applicationId = "com.pocketagent"
         minSdk = 26
-        // CRITICAL: targetSdk 28 is required for executing binaries from app-private
-        // storage. Android 10+ (API 29+) enforces W^X (Write XOR Execute) which blocks
-        // execution of files from writable directories like /data/data/<pkg>/files/.
-        // Termux uses the same approach. Since we sideload (not Play Store), this is safe.
-        // Forward-compatibility for Android 14+ is handled by:
-        //   - foregroundServiceType="dataSync" in the manifest
-        //   - POST_NOTIFICATIONS permission requested at runtime
-        //   - FOREGROUND_SERVICE_DATA_SYNC permission declared
+        // v6: Kept targetSdk 28 — required for executing binaries from app-private
+        // storage (W^X exemption). No longer strictly needed since we don't run binaries
+        // directly anymore, but kept for compatibility with any future features.
         targetSdk = 28
-        versionCode = 51
-        versionName = "5.1.0"
+        versionCode = 60
+        versionName = "6.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

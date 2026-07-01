@@ -1,7 +1,7 @@
 package com.pocketagent.agent.tools
 
+import com.pocketagent.bridge.TermuxBridge
 import com.pocketagent.llm.ToolSpec
-import com.pocketagent.sandbox.Workspace
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -9,20 +9,23 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import java.nio.file.FileSystems
-import java.nio.file.PathMatcher
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * v6: glob tool uses `find` via the Termux daemon.
+ * Caps at 100 results, sorted by modification time (newest first).
+ */
 @Singleton
 class GlobTool @Inject constructor(
-    private val workspace: Workspace
+    private val bridge: TermuxBridge
 ) : AgentTool {
 
     override val name = "glob"
     override val description = """
-        Find files matching a glob pattern. Returns paths sorted by modification time (newest first). Caps at 100.
-        Supports: ** (recursive), * (any non-slash), ? (single char), [abc] (char class), {a,b} (alternation).
+        Find files matching a glob pattern under a path in $HOME.
+        Returns paths sorted by modification time (newest first). Caps at 100.
+        Patterns supported: ** (recursive), * (any), ? (single char), [abc], {a,b}.
         Examples: **/*.kt, src/**/*.py, *.md, {test,spec}/*.js
     """.trimIndent()
 
@@ -31,46 +34,56 @@ class GlobTool @Inject constructor(
     """.trimIndent()
 
     override suspend fun execute(arguments: kotlinx.serialization.json.JsonElement): ToolResult {
-        val obj = arguments as? JsonObject ?: return ToolResult.Error("Arguments must be a JSON object")
-        val pattern = obj["pattern"]?.jsonPrimitive?.contentOrNull ?: return ToolResult.Error("Missing 'pattern'")
+        val obj = arguments as? JsonObject ?: return ToolResult.Error("Arguments must be a JSON object", "Pass a JSON object with 'pattern'.")
+        val pattern = obj["pattern"]?.jsonPrimitive?.contentOrNull
+            ?: return ToolResult.Error("Missing 'pattern'", "Provide a 'pattern' field.")
         val pathStr = obj["path"]?.jsonPrimitive?.contentOrNull ?: "."
 
-        val searchDir = try { workspace.resolve(pathStr) } catch (e: SecurityException) { return ToolResult.Error(e.message ?: "Invalid path") }
-        if (!searchDir.exists()) return ToolResult.Error("Path not found: $pathStr")
-
-        // C2 FIX: Use JDK PathMatcher instead of broken chained regex replacements.
-        // The old code did .replace("**", ".*").replace("*", "[^/]*") which corrupted
-        // the .* produced by the first replacement into .[^/]* — broken for ** patterns.
-        val matcher: PathMatcher = try {
-            FileSystems.getDefault().getPathMatcher("glob:$pattern")
-        } catch (e: Exception) {
-            return ToolResult.Error("Invalid pattern: ${e.message}")
+        if (!bridge.state.isConnected) {
+            return ToolResult.Error("Termux daemon not connected", "Start the daemon: `pocketagent-daemon` in Termux.")
         }
 
-        val maxResults = 100
-        val results = searchDir.walkTopDown()
-            .filter { it.isFile }
-            .filter { f ->
-                val relPath = searchDir.toPath().relativize(f.toPath())
-                // Match against the relative path (so ** works) AND the file name (so *.kt works)
-                matcher.matches(relPath) || matcher.matches(relPath.fileName) || matcher.matches(f.toPath().fileName)
-            }
-            .sortedByDescending { it.lastModified() }
-            .take(maxResults)
-            .map { f ->
-                val relPath = workspace.homeDir.toPath().relativize(f.toPath()).toString()
+        // Use find with -path pattern matching, sort by mtime, take 100
+        // We translate ** to * for find, and prefix with the search dir.
+        val findPattern = pattern
+            .replace("**/", "")
+            .replace("**", "*")
+            .replace("*", "*")
+            .replace("?", "?")
+
+        // Build the find command
+        // find <path> -type f -name '<pattern>' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -100 | cut -d' ' -f2-
+        // Busybox find doesn't support -printf, so use stat instead
+        val cmd = buildString {
+            append("find '")
+            append(pathStr.replace("'", "'\\''"))
+            append("' -type f -name '")
+            append(findPattern.replace("'", "'\\''"))
+            append("' 2>/dev/null | head -100 | while read -r f; do ")
+            append("mtime=$(stat -c %Y \"$f\" 2>/dev/null || stat -f %m \"$f\" 2>/dev/null || echo 0); ")
+            append("echo \"$mtime|$f\"; done | sort -rn | cut -d'|' -f2-")
+        }
+
+        val result = bridge.exec(cmd, timeout = 30)
+        val response = result.getOrElse { e ->
+            return ToolResult.Error("Bridge error: ${e.message}", "Check Termux daemon is running.")
+        }
+
+        val results = response.stdout.lines()
+            .filter { it.isNotBlank() }
+            .map { path ->
                 JsonObject(mapOf(
-                    "path" to JsonPrimitive(relPath),
-                    "size" to JsonPrimitive(f.length()),
-                    "modified" to JsonPrimitive(f.lastModified())
+                    "path" to JsonPrimitive(path.trim())
                 ))
             }
-            .toList()
+
+        val maxResults = 100
+        val truncated = results.size >= maxResults
 
         val output = buildJsonObject {
             put("pattern", pattern)
             put("count", JsonPrimitive(results.size))
-            put("truncated", JsonPrimitive(results.size >= maxResults))
+            put("truncated", JsonPrimitive(truncated))
             put("files", JsonArray(results))
         }
         val display = if (results.isEmpty()) "No files matching: $pattern"

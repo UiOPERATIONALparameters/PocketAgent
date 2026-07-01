@@ -47,7 +47,7 @@ object DatabaseModule {
             PocketDatabase::class.java,
             PocketDatabase.NAME
         )
-            .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_1_2, PocketDatabase.MIGRATION_2_3)
             // H18 FIX: on first open after a crash, reset all isStreaming=true messages
             // to isStreaming=false. Without this, crashed streams stay "spinning" forever.
             .addCallback(object : RoomDatabase.Callback() {

@@ -20,7 +20,8 @@ data class RootState(
 
 @HiltViewModel
 class RootViewModel @Inject constructor(
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val bridge: com.pocketagent.bridge.TermuxBridge
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(RootState())
@@ -29,6 +30,8 @@ class RootViewModel @Inject constructor(
     fun bootstrap() {
         viewModelScope.launch {
             settingsRepository.load()
+            // v6: refresh Termux bridge connection on app start
+            bridge.refreshState()
             val s = settingsRepository.settings.value
             val provider = settingsRepository.getActiveProvider()
 

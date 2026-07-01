@@ -7,6 +7,15 @@ import kotlinx.serialization.json.JsonElement
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * v6 ToolRouter — registers all tools, including the new compact, task, and state tools.
+ *
+ * Tools (17 total):
+ *   bash, file_read, file_write, file_list, str_replace, grep, glob,
+ *   web_fetch, web_search, web_reader, load_skill, install_apk,
+ *   todo, serve_http,
+ *   compact (NEW), task (NEW — replaces spawn_subagent), state (NEW)
+ */
 @Singleton
 class ToolRouter @Inject constructor(
     private val bashTool: BashTool,
@@ -23,7 +32,9 @@ class ToolRouter @Inject constructor(
     private val webReaderTool: WebReaderTool,
     private val todoTool: TodoTool,
     private val serveHttpTool: ServeHttpTool,
-    private val spawnSubagentTool: SpawnSubagentTool
+    private val compactTool: CompactTool,
+    private val taskTool: TaskTool,
+    private val stateTool: StateTool
 ) {
     private val tools: Map<String, AgentTool> = mapOf(
         bashTool.name to bashTool,
@@ -40,7 +51,9 @@ class ToolRouter @Inject constructor(
         webReaderTool.name to webReaderTool,
         todoTool.name to todoTool,
         serveHttpTool.name to serveHttpTool,
-        spawnSubagentTool.name to spawnSubagentTool
+        compactTool.name to compactTool,
+        taskTool.name to taskTool,
+        stateTool.name to stateTool
     )
 
     fun specs(): List<ToolSpec> = listOf(
@@ -58,15 +71,23 @@ class ToolRouter @Inject constructor(
         installApkTool.toSpec(),
         todoTool.toSpec(),
         serveHttpTool.toSpec(),
-        spawnSubagentTool.toSpec()
+        compactTool.toSpec(),
+        taskTool.toSpec(),
+        stateTool.toSpec()
     )
 
     suspend fun execute(toolName: String, arguments: JsonElement): ToolResult {
-        val tool = tools[toolName] ?: return ToolResult.Error("Unknown tool: $toolName")
+        val tool = tools[toolName] ?: return ToolResult.Error(
+            "Unknown tool: $toolName",
+            "Available tools: ${tools.keys.joinToString(", ")}"
+        )
         return try {
             withContext(Dispatchers.IO) { tool.execute(arguments) }
         } catch (e: Exception) {
-            ToolResult.Error("Tool execution failed: ${e.message ?: e::class.simpleName}")
+            ToolResult.Error(
+                "Tool execution failed: ${e.message ?: e::class.simpleName}",
+                "This is an unexpected error. Try a different approach or report the error."
+            )
         }
     }
 }

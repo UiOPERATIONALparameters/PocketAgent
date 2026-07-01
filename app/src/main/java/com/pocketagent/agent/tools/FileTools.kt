@@ -1,8 +1,7 @@
 package com.pocketagent.agent.tools
 
+import com.pocketagent.bridge.TermuxBridge
 import com.pocketagent.llm.ToolSpec
-import com.pocketagent.sandbox.PathGuard
-import com.pocketagent.sandbox.Workspace
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -13,19 +12,24 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * v6: File tools route through the Termux daemon.
+ * Path safety is enforced daemon-side (confined to $HOME, .. blocked).
+ */
+
 @Singleton
 class FileReadTool @Inject constructor(
-    private val workspace: Workspace
+    private val bridge: TermuxBridge
 ) : AgentTool {
 
     override val name = "file_read"
     override val description = """
-        Read the contents of a file from the agent's workspace.
-        Path is relative to the workspace root (~).
+        Read the contents of a file from the Termux home directory.
+        Path is relative to $HOME. Use ~ or absolute paths under $HOME.
+        Returns up to 1MB of text content. Binary files return hex.
     """.trimIndent()
 
     override val parametersSchema = """
@@ -34,7 +38,7 @@ class FileReadTool @Inject constructor(
           "properties": {
             "path": {
               "type": "string",
-              "description": "Path to the file, relative to workspace root"
+              "description": "Path to the file (relative to $HOME or absolute under $HOME)"
             },
             "start_line": {
               "type": "integer",
@@ -49,48 +53,29 @@ class FileReadTool @Inject constructor(
         }
     """.trimIndent()
 
-    private val json = Json { ignoreUnknownKeys = true }
-
     override suspend fun execute(arguments: JsonElement): ToolResult {
         val obj = arguments as? JsonObject
             ?: return ToolResult.Error("Arguments must be a JSON object")
         val pathStr = obj["path"]?.jsonPrimitive?.content
-            ?: return ToolResult.Error("Missing 'path' parameter")
+            ?: return ToolResult.Error("Missing 'path' parameter", "Provide a 'path' field with the file to read.")
         val startLine = obj["start_line"]?.jsonPrimitive?.intOrNull ?: 1
         val endLine = obj["end_line"]?.jsonPrimitive?.intOrNull ?: Int.MAX_VALUE
 
-        val file = try {
-            workspace.resolve(pathStr)
-        } catch (e: SecurityException) {
-            return ToolResult.Error(e.message ?: "Invalid path")
+        if (!bridge.state.isConnected) {
+            return ToolResult.Error("Termux daemon not connected", "Start the daemon: `pocketagent-daemon` in Termux.")
         }
 
-        if (!file.exists()) {
-            return ToolResult.Error("File not found: $pathStr")
-        }
-        if (!file.isFile) {
-            return ToolResult.Error("Not a file: $pathStr")
+        val result = bridge.readFile(pathStr)
+
+        val response = result.getOrElse { e ->
+            return ToolResult.Error("Bridge error: ${e.message}", "Check Termux daemon is running.")
         }
 
-        val maxBytes = 256_000
-        val raw = try {
-            file.readBytes()
-        } catch (e: IOException) {
-            return ToolResult.Error("Failed to read: ${e.message}")
+        if (response.error != null) {
+            return ToolResult.Error(response.error, "Check the path and try again.")
         }
 
-        val truncated = raw.size > maxBytes
-        // H15 FIX: walk back to the previous UTF-8 boundary before creating the String.
-        // Was: String(raw, 0, maxBytes, UTF_8) — could split multi-byte chars mid-character,
-        // producing ? replacement chars or throwing on some JVMs.
-        val text = if (truncated) {
-            val safeEnd = findUtf8Boundary(raw, maxBytes)
-            String(raw, 0, safeEnd, Charsets.UTF_8)
-        } else {
-            String(raw, Charsets.UTF_8)
-        }
-
-        val lines = text.lines()
+        val lines = response.content.lines()
         val sliced = lines.subList(
             (startLine - 1).coerceIn(0, lines.size),
             endLine.coerceAtMost(lines.size)
@@ -98,12 +83,13 @@ class FileReadTool @Inject constructor(
         val content = sliced.joinToString("\n")
 
         val output = buildJsonObject {
-            put("path", pathStr)
+            put("path", response.path)
             put("content", content)
             put("total_lines", JsonPrimitive(lines.size))
             put("returned_lines", JsonPrimitive(sliced.size))
-            put("truncated", JsonPrimitive(truncated))
-            put("bytes", JsonPrimitive(raw.size))
+            put("truncated", JsonPrimitive(response.truncated))
+            put("binary", JsonPrimitive(response.binary))
+            put("bytes", JsonPrimitive(response.size))
         }
         return ToolResult.Success(output, content)
     }
@@ -113,14 +99,14 @@ class FileReadTool @Inject constructor(
 
 @Singleton
 class FileWriteTool @Inject constructor(
-    private val workspace: Workspace,
-    private val settings: com.pocketagent.storage.prefs.SettingsRepository
+    private val bridge: TermuxBridge
 ) : AgentTool {
 
     override val name = "file_write"
     override val description = """
-        Write content to a file in the agent's workspace. Creates parent
-        directories if needed. Overwrites existing files by default.
+        Write content to a file in the Termux home directory.
+        Creates parent directories if needed. Overwrites existing files.
+        For appending, use the bash tool with `echo >> file`.
     """.trimIndent()
 
     override val parametersSchema = """
@@ -129,16 +115,11 @@ class FileWriteTool @Inject constructor(
           "properties": {
             "path": {
               "type": "string",
-              "description": "Path to write, relative to workspace root"
+              "description": "Path to write (relative to $HOME or absolute under $HOME)"
             },
             "content": {
               "type": "string",
               "description": "Content to write"
-            },
-            "append": {
-              "type": "boolean",
-              "description": "If true, append instead of overwrite",
-              "default": false
             }
           },
           "required": ["path", "content"]
@@ -149,38 +130,29 @@ class FileWriteTool @Inject constructor(
         val obj = arguments as? JsonObject
             ?: return ToolResult.Error("Arguments must be a JSON object")
         val pathStr = obj["path"]?.jsonPrimitive?.content
-            ?: return ToolResult.Error("Missing 'path' parameter")
+            ?: return ToolResult.Error("Missing 'path' parameter", "Provide a 'path' field.")
         val content = obj["content"]?.jsonPrimitive?.content
-            ?: return ToolResult.Error("Missing 'content' parameter")
-        // H14 FIX: explicit case-insensitive boolean parsing
-        val append = obj["append"]?.jsonPrimitive?.contentOrNull?.equals("true", ignoreCase = true) == true
+            ?: return ToolResult.Error("Missing 'content' parameter", "Provide a 'content' field with the file contents.")
 
-        val file = try {
-            workspace.resolve(pathStr)
-        } catch (e: SecurityException) {
-            return ToolResult.Error(e.message ?: "Invalid path")
+        if (!bridge.state.isConnected) {
+            return ToolResult.Error("Termux daemon not connected", "Start the daemon: `pocketagent-daemon` in Termux.")
         }
 
-        // M13 FIX: read quota from user's settings (was hardcoded 2048MB).
-        val quotaMb = settings.settings.value.workspaceQuotaMb
-        val projectedBytes = (if (append) file.length() + content.toByteArray().size else content.toByteArray().size).toLong()
-        if (workspace.wouldExceedQuota(projectedBytes, quotaMb)) {
-            return ToolResult.Error("Workspace quota exceeded (${quotaMb}MB). Delete files in the Files browser or raise the quota in Settings.")
+        val result = bridge.writeFile(pathStr, content)
+
+        val response = result.getOrElse { e ->
+            return ToolResult.Error("Bridge error: ${e.message}", "Check Termux daemon is running.")
         }
 
-        try {
-            PathGuard.ensureParentExists(file)
-            if (append) file.appendText(content) else file.writeText(content)
-        } catch (e: IOException) {
-            return ToolResult.Error("Failed to write: ${e.message}")
+        if (response.error != null) {
+            return ToolResult.Error(response.error, "Check the path is under $HOME.")
         }
 
         val output = buildJsonObject {
-            put("path", pathStr)
-            put("bytes_written", JsonPrimitive(content.toByteArray().size))
-            put("appended", JsonPrimitive(append))
+            put("path", response.path)
+            put("bytes_written", JsonPrimitive(response.bytes))
         }
-        return ToolResult.Success(output, "Wrote ${content.toByteArray().size} bytes to $pathStr")
+        return ToolResult.Success(output, "Wrote ${response.bytes} bytes to ${response.path}")
     }
 
     fun toSpec(): ToolSpec = ToolSpec(name, description, parametersSchema)
@@ -188,13 +160,14 @@ class FileWriteTool @Inject constructor(
 
 @Singleton
 class FileListTool @Inject constructor(
-    private val workspace: Workspace
+    private val bridge: TermuxBridge
 ) : AgentTool {
 
     override val name = "file_list"
     override val description = """
-        List files and directories in the agent's workspace.
-        Returns names, types, and sizes.
+        List files and directories in a path under $HOME.
+        Returns names, types, sizes, and modification times.
+        Use path="~" for home directory, or any subdirectory.
     """.trimIndent()
 
     override val parametersSchema = """
@@ -203,13 +176,8 @@ class FileListTool @Inject constructor(
           "properties": {
             "path": {
               "type": "string",
-              "description": "Directory to list, relative to workspace root. Defaults to root.",
-              "default": "."
-            },
-            "recursive": {
-              "type": "boolean",
-              "description": "If true, list recursively",
-              "default": false
+              "description": "Directory to list (default: ~)",
+              "default": "~"
             }
           }
         }
@@ -217,76 +185,39 @@ class FileListTool @Inject constructor(
 
     override suspend fun execute(arguments: JsonElement): ToolResult {
         val obj = arguments as? JsonObject ?: JsonObject(emptyMap())
-        val pathStr = obj["path"]?.jsonPrimitive?.content ?: "."
-        val recursive = obj["recursive"]?.jsonPrimitive?.contentOrNull == "true"
+        val pathStr = obj["path"]?.jsonPrimitive?.content ?: "~"
 
-        val dir = try {
-            workspace.resolve(pathStr)
-        } catch (e: SecurityException) {
-            return ToolResult.Error(e.message ?: "Invalid path")
+        if (!bridge.state.isConnected) {
+            return ToolResult.Error("Termux daemon not connected", "Start the daemon: `pocketagent-daemon` in Termux.")
         }
 
-        if (!dir.exists()) {
-            return ToolResult.Error("Directory not found: $pathStr")
-        }
-        if (!dir.isDirectory) {
-            return ToolResult.Error("Not a directory: $pathStr")
+        val result = bridge.listFiles(pathStr)
+
+        val response = result.getOrElse { e ->
+            return ToolResult.Error("Bridge error: ${e.message}", "Check Termux daemon is running.")
         }
 
-        val entries = mutableListOf<JsonObject>()
-        val walk: Sequence<java.io.File> = if (recursive) {
-            dir.walkTopDown()
-        } else {
-            (dir.listFiles()?.toList() ?: emptyList()).asSequence()
+        if (response.error != null) {
+            return ToolResult.Error(response.error, "Check the path is a directory under $HOME.")
         }
-        // C1 FIX: consume the sequence ONCE. Was: take(500).toList() then take(501).count()
-        // (Kotlin Sequence is single-use; second call returned 0, so truncated was always false)
-        val allFiles = walk.take(501).toList()  // 1 extra to detect truncation
-        val limited = allFiles.take(500)
-        val truncated = allFiles.size > 500
-        for (f in limited) {
-            val rel = dir.toPath().relativize(f.toPath()).toString()
-            if (rel.isEmpty()) continue
-            entries.add(buildJsonObject {
-                put("name", JsonPrimitive(rel))
-                put("type", JsonPrimitive(if (f.isDirectory) "directory" else "file"))
-                put("size", JsonPrimitive(if (f.isFile) f.length() else 0))
-                put("modified", JsonPrimitive(f.lastModified()))
-            })
-        }
+
+        val entriesArray = JsonArray(response.entries.map { entry ->
+            buildJsonObject {
+                put("name", JsonPrimitive(entry.name))
+                put("type", JsonPrimitive(entry.type))
+                put("size", JsonPrimitive(entry.size))
+                put("modified", JsonPrimitive(entry.mtime))
+                put("hidden", JsonPrimitive(entry.hidden))
+            }
+        })
 
         val output = buildJsonObject {
-            put("path", pathStr)
-            put("entries", JsonPrimitive(entries.size))
-            // Use a JsonArray of the entry objects
-            val arr = JsonArray(entries)
-            put("items", arr)
-            put("truncated", JsonPrimitive(truncated))
+            put("path", response.path)
+            put("count", JsonPrimitive(response.entries.size))
+            put("entries", entriesArray)
         }
-        return ToolResult.Success(output, "Listed ${entries.size} entries in $pathStr")
+        return ToolResult.Success(output, "Listed ${response.entries.size} entries in ${response.path}")
     }
 
     fun toSpec(): ToolSpec = ToolSpec(name, description, parametersSchema)
-}
-
-/**
- * Find the largest offset <= maxBytes that ends on a UTF-8 character boundary.
- * UTF-8 continuation bytes have the bit pattern 10xxxxxx (0x80-0xBF).
- * Walk back from maxBytes until we find a byte that is NOT a continuation byte.
- * Used by FileReadTool to avoid splitting multi-byte characters on truncation (H15).
- */
-private fun findUtf8Boundary(bytes: ByteArray, maxBytes: Int): Int {
-    if (maxBytes >= bytes.size) return bytes.size
-    var i = maxBytes
-    while (i > 0) {
-        val b = bytes[i - 1].toInt() and 0xFF
-        // If this byte is a continuation byte (0x80-0xBF), it's mid-character — keep walking back
-        if (b and 0xC0 == 0x80) {
-            i--
-        } else {
-            // This is a leading byte (or ASCII); i is now a valid boundary
-            break
-        }
-    }
-    return i
 }
