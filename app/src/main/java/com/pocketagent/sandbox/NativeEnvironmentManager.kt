@@ -601,7 +601,7 @@ exec /data/data/com.termux/files/usr/bin/env "$@"
             Dir::Bin::dpkg "${usrDir.absolutePath}/bin/dpkg";
             Dir::Bin::apt-get "${usrDir.absolutePath}/bin/apt-get";
             Dir::Bin::apt-cache "${usrDir.absolutePath}/bin/apt-cache";
-            DPkg::Options { "--instdir=${usrDir.absolutePath}"; "--force-not-root"; "--force-confdef"; "--force-confold"; "--force-architecture"; "--force-depends"; "--admindir=${usrDir.absolutePath}/var/lib/dpkg"; };
+            DPkg::Options { "--force-not-root"; "--force-confdef"; "--force-confold"; "--admindir=${usrDir.absolutePath}/var/lib/dpkg"; };
             APT::Architecture "$arch";
             Acquire::Languages "none";
             APT::Install-Recommends "0";
@@ -660,9 +660,6 @@ exec /data/data/com.termux/files/usr/bin/env "$@"
             force-not-root
             force-confdef
             force-confold
-            force-architecture
-            force-depends
-            admindir /data/data/com.termux/files/usr/var/lib/dpkg
         """.trimIndent())
     }
 
@@ -878,14 +875,16 @@ exec /data/data/com.termux/files/usr/bin/env "$@"
             // (postinst, preinst) trigger seccomp (signal 31) when LD_PRELOAD is set.
             // dpkg itself doesn't need termux-exec; only interactive shells do.
             if (cmd == "dpkg" || cmd == "apt" || cmd == "apt-get") {
+                // v5.1: Completely strip LD_PRELOAD from environment using 'env -u'
+                // This is more thorough than 'unset' — it removes the var entirely
+                // from the process environment, preventing any child process from
+                // inheriting it. This fixes seccomp (signal 31) in postinst scripts.
                 wrapper.writeText("""#!$bashPath
-# PocketAgent wrapper for $cmd — sets up environment, then UNSETS LD_PRELOAD
-# to prevent seccomp (signal 31) from killing maintainer scripts
+# PocketAgent wrapper for $cmd — strips LD_PRELOAD completely
 $envSetup
-# v4.8: Unset LD_PRELOAD — dpkg/apt don't need termux-exec path rewriting
-# and maintainer scripts (postinst/preinst) trigger seccomp when it's set
-unset LD_PRELOAD
-exec "${realFile.absolutePath}" "$@"
+# v5.1: Use env -u to completely remove LD_PRELOAD from the environment
+# This prevents seccomp (signal 31) from killing maintainer scripts
+exec env -u LD_PRELOAD "${realFile.absolutePath}" "$@"
 """.trimIndent())
             } else {
                 wrapper.writeText("""#!$bashPath
