@@ -203,10 +203,15 @@ fun ChatScreen(
                         .weight(1f)
                         .fillMaxWidth(),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(state.messages, key = { it.id }) { msg ->
-                        ChatMessageItem(msg)
+                    // v4.6: Group consecutive tool messages into collapsed summary cards
+                    val groupedMessages = remember(state.messages) { groupConsecutiveTools(state.messages) }
+                    items(groupedMessages, key = { it.id }) { item ->
+                        when (item) {
+                            is GroupedMessage.Single -> ChatMessageItem(item.msg)
+                            is GroupedMessage.ToolGroup -> ToolGroupCard(item.messages)
+                        }
                     }
                     // Streaming message
                     if (state.isAgentRunning && (state.streamingContent.isNotEmpty() || state.streamingReasoning.isNotEmpty() || state.streamingToolCalls.isNotEmpty())) {
@@ -1066,6 +1071,77 @@ private fun ErrorBanner(message: String, onDismiss: () -> Unit) {
                     contentDescription = "Dismiss",
                     tint = Color.White
                 )
+            }
+        }
+    }
+}
+
+// v4.6: Tool call grouping — collapse consecutive tool messages into summary cards
+
+sealed class GroupedMessage {
+    abstract val id: String
+    data class Single(val msg: ChatMessageUi) : GroupedMessage() { override val id = msg.id }
+    data class ToolGroup(val messages: List<ChatMessageUi>) : GroupedMessage() { override val id = messages.firstOrNull()?.id ?: java.util.UUID.randomUUID().toString() }
+}
+
+fun groupConsecutiveTools(messages: List<ChatMessageUi>): List<GroupedMessage> {
+    val result = mutableListOf<GroupedMessage>()
+    var toolBuffer = mutableListOf<ChatMessageUi>()
+    for (msg in messages) {
+        if (msg.role == "tool") {
+            toolBuffer.add(msg)
+        } else {
+            if (toolBuffer.isNotEmpty()) {
+                result.add(GroupedMessage.ToolGroup(toolBuffer.toList()))
+                toolBuffer.clear()
+            }
+            result.add(GroupedMessage.Single(msg))
+        }
+    }
+    if (toolBuffer.isNotEmpty()) result.add(GroupedMessage.ToolGroup(toolBuffer.toList()))
+    return result
+}
+
+@Composable
+private fun ToolGroupCard(messages: List<ChatMessageUi>) {
+    val ext = extendedColors()
+    var expanded by remember { mutableStateOf(false) }
+    val toolCounts = remember(messages) { messages.groupingBy { it.toolName ?: "tool" }.eachCount() }
+    val summary = remember(messages) {
+        buildString {
+            val total = messages.size
+            if (total == 1) {
+                val msg = messages.first()
+                if (msg.toolName == "bash" && msg.toolArguments != null) {
+                    try { val obj = org.json.JSONObject(msg.toolArguments); val cmd = obj.optString("command", "").take(60); if (cmd.isNotEmpty()) append("$ $cmd") else append("bash") } catch (_: Exception) { append("bash") }
+                } else { append(msg.toolName ?: "tool") }
+            } else {
+                val parts = toolCounts.map { (name, count) -> "$count\u00d7 $name" }
+                append(parts.joinToString(", "))
+            }
+            val hasError = messages.any { it.toolResult?.contains("\"error\"") == true }
+            if (hasError) append(" \u2717") else append(" \u2713")
+        }
+    }
+    Surface(
+        color = ext.toolCardBg,
+        shape = RoundedCornerShape(8.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, ext.toolCardBorder),
+        modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("\u26a1", style = PocketType.CodeSmall, color = ext.textTertiary)
+                Spacer(Modifier.size(6.dp))
+                Text(summary, style = PocketType.CodeSmall, color = if (summary.contains("\u2717")) ext.error else ext.textSecondary, maxLines = 1, modifier = Modifier.weight(1f))
+                Icon(imageVector = if (expanded) Icons.Filled.KeyboardArrowDown else Icons.Filled.ChevronRight, contentDescription = null, tint = ext.textTertiary, modifier = Modifier.size(16.dp))
+            }
+            if (expanded) {
+                Spacer(Modifier.height(6.dp))
+                messages.forEach { msg ->
+                    ToolCallCard(toolName = msg.toolName ?: "tool", arguments = msg.toolArguments, result = msg.toolResult, display = msg.toolDisplay)
+                    Spacer(Modifier.height(4.dp))
+                }
             }
         }
     }

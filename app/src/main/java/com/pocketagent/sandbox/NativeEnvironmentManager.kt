@@ -506,7 +506,7 @@ class NativeEnvironmentManager @Inject constructor(
             Dir::Bin::dpkg "${usrDir.absolutePath}/bin/dpkg";
             Dir::Bin::apt-get "${usrDir.absolutePath}/bin/apt-get";
             Dir::Bin::apt-cache "${usrDir.absolutePath}/bin/apt-cache";
-            DPkg::Options { "--root=${usrDir.absolutePath}"; "--force-not-root"; "--force-confdef"; "--force-confold"; "--admindir=${usrDir.absolutePath}/var/lib/dpkg"; };
+            DPkg::Options { "--instdir=${usrDir.absolutePath}"; "--force-not-root"; "--force-confdef"; "--force-confold"; "--admindir=${usrDir.absolutePath}/var/lib/dpkg"; };
             APT::Architecture "$arch";
             Acquire::Languages "none";
             APT::Install-Recommends "0";
@@ -566,7 +566,6 @@ class NativeEnvironmentManager @Inject constructor(
             force-architecture
             force-depends
             admindir /data/data/com.termux/files/usr/var/lib/dpkg
-            root /data/data/com.termux/files/usr
         """.trimIndent())
     }
 
