@@ -278,26 +278,24 @@ fun SettingsScreen(
                     }
                 }
 
-                // Agent section
+                // v7: Agent section (cleaned up — no more workspace quota, no advanced/skills)
                 Section(title = "Agent") {
                     // System prompt
-                    Text("System Prompt", style = PocketType.Label, color = ext.textSecondary)
-                    Spacer(Modifier.height(6.dp))
+                    Text("System Prompt (optional)", style = PocketType.Label, color = ext.textSecondary)
+                    Text(
+                        "Override the agent's identity. Leave empty for default.",
+                        style = PocketType.BodySmall,
+                        color = ext.textTertiary,
+                        modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
+                    )
                     OutlinedTextField(
                         value = state.systemPrompt,
                         onValueChange = viewModel::onSystemPromptChange,
-                        placeholder = {
-                            Text(
-                                "Leave empty to use default. Custom prompt overrides the agent's identity and behavior.",
-                                style = PocketType.BodySmall,
-                                color = ext.textSecondary
-                            )
-                        },
-                        textStyle = PocketType.BodySmall.copy(color = ext.textPrimary),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 100.dp, max = 240.dp),
+                            .heightIn(min = 80.dp, max = 200.dp),
                         shape = RoundedCornerShape(12.dp),
+                        textStyle = PocketType.BodySmall.copy(color = ext.textPrimary),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedContainerColor = ext.surface,
                             unfocusedContainerColor = ext.surface,
@@ -306,146 +304,89 @@ fun SettingsScreen(
                             cursorColor = ext.accent
                         )
                     )
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(6.dp))
                     SaveButton(
-                        text = "Save System Prompt",
+                        text = "Save Prompt",
                         onClick = {
                             viewModel.saveSystemPrompt()
                             Toast.makeText(context, "System prompt saved", Toast.LENGTH_SHORT).show()
                         }
                     )
 
-                    Spacer(Modifier.height(12.dp))
-
-                    // Bash timeout
-                    Text("Bash Command Timeout (seconds)", style = PocketType.Label, color = ext.textSecondary)
-                    Spacer(Modifier.height(6.dp))
-                    OutlinedTextField(
-                        value = state.bashTimeoutSec.toString(),
-                        onValueChange = { v -> v.toIntOrNull()?.let { viewModel.onBashTimeoutChange(it.coerceIn(5, 300)) } },
-                        textStyle = PocketType.Body.copy(color = ext.textPrimary),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = ext.surface,
-                            unfocusedContainerColor = ext.surface,
-                            focusedBorderColor = ext.accent,
-                            unfocusedBorderColor = ext.divider,
-                            cursorColor = ext.accent
-                        )
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    SaveButton(
-                        text = "Save Timeout",
-                        onClick = {
-                            viewModel.saveBashTimeout()
-                            Toast.makeText(context, "Timeout saved: ${state.bashTimeoutSec}s", Toast.LENGTH_SHORT).show()
-                        }
-                    )
-
-                    Spacer(Modifier.height(12.dp))
-
-                    // Workspace quota
-                    Text("Workspace Quota (MB)", style = PocketType.Label, color = ext.textSecondary)
-                    Spacer(Modifier.height(6.dp))
-                    OutlinedTextField(
-                        value = state.workspaceQuotaMb.toString(),
-                        onValueChange = { v -> v.toIntOrNull()?.let { viewModel.onWorkspaceQuotaChange(it.coerceIn(100, 10240)) } },
-                        textStyle = PocketType.Body.copy(color = ext.textPrimary),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = ext.surface,
-                            unfocusedContainerColor = ext.surface,
-                            focusedBorderColor = ext.accent,
-                            unfocusedBorderColor = ext.divider,
-                            cursorColor = ext.accent
-                        )
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    SaveButton(
-                        text = "Save Quota",
-                        onClick = {
-                            // v7: quota not used in cloud mode, but kept for compat
-                            Toast.makeText(context, "Quota saved: ${state.workspaceQuotaMb}MB", Toast.LENGTH_SHORT).show()
-                        }
-                    )
-
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(16.dp))
 
                     // Max tool iterations
-                    Text("Max Tool Iterations (per turn)", style = PocketType.Label, color = ext.textSecondary)
-                    Spacer(Modifier.height(6.dp))
-                    OutlinedTextField(
-                        value = state.maxToolIterations.toString(),
-                        onValueChange = { v -> v.toIntOrNull()?.let { viewModel.onMaxIterationsChange(it.coerceIn(5, 100)) } },
-                        textStyle = PocketType.Body.copy(color = ext.textPrimary),
-                        singleLine = true,
+                    Text("Max Tool Iterations", style = PocketType.Label, color = ext.textSecondary)
+                    Text(
+                        "Per turn (5-100). Higher = longer tasks, more tokens.",
+                        style = PocketType.BodySmall,
+                        color = ext.textTertiary,
+                        modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
+                    )
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = ext.surface,
-                            unfocusedContainerColor = ext.surface,
-                            focusedBorderColor = ext.accent,
-                            unfocusedBorderColor = ext.divider,
-                            cursorColor = ext.accent
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = state.maxToolIterations.toString(),
+                            onValueChange = { v -> v.toIntOrNull()?.let { viewModel.onMaxIterationsChange(it.coerceIn(5, 100)) } },
+                            textStyle = PocketType.Body.copy(color = ext.textPrimary),
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = ext.surface,
+                                unfocusedContainerColor = ext.surface,
+                                focusedBorderColor = ext.accent,
+                                unfocusedBorderColor = ext.divider,
+                                cursorColor = ext.accent
+                            )
                         )
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    SaveButton(
-                        text = "Save Iterations",
-                        onClick = {
-                            viewModel.saveMaxIterations()
-                            Toast.makeText(context, "Max iterations saved: ${state.maxToolIterations}", Toast.LENGTH_SHORT).show()
-                        }
-                    )
+                        SaveButton(
+                            text = "Save",
+                            onClick = {
+                                viewModel.saveMaxIterations()
+                                Toast.makeText(context, "Saved: ${state.maxToolIterations} iterations", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    }
 
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(16.dp))
 
-                    // Token Save Mode toggle
+                    // Token Save Mode toggle (modern rounded card)
                     Surface(
                         color = ext.surface,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(16.dp),
                         border = androidx.compose.foundation.BorderStroke(1.dp, ext.divider),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
-                            modifier = Modifier.padding(12.dp),
+                            modifier = Modifier.padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
+                                Text("Token Save Mode", style = PocketType.BodyMedium, color = ext.textPrimary)
                                 Text(
-                                    "Token Save Mode",
-                                    style = PocketType.BodyMedium,
-                                    color = ext.textPrimary
-                                )
-                                Text(
-                                    "Truncates tool results more aggressively and skips reasoning. Saves tokens for long sessions. Tools still work.",
+                                    "Truncate results + skip reasoning. Saves tokens for long sessions.",
                                     style = PocketType.BodySmall,
                                     color = ext.textSecondary,
                                     modifier = Modifier.padding(top = 2.dp)
                                 )
                             }
-                            Spacer(Modifier.width(8.dp))
+                            Spacer(Modifier.width(12.dp))
                             androidx.compose.material3.Switch(
                                 checked = state.tokenSaveMode,
                                 onCheckedChange = { enabled ->
                                     viewModel.onTokenSaveModeChange(enabled)
                                     viewModel.saveTokenSaveMode()
-                                    Toast.makeText(
-                                        context,
-                                        if (enabled) "Token save mode ON — results truncated, reasoning hidden" else "Token save mode OFF — full output",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
                                 },
                                 colors = androidx.compose.material3.SwitchDefaults.colors(
-                                    checkedThumbColor = ext.accent,
-                                    checkedTrackColor = ext.accent.copy(alpha = 0.3f)
+                                    checkedThumbColor = ext.textOnAccent,
+                                    checkedTrackColor = ext.accent,
+                                    uncheckedThumbColor = ext.textTertiary,
+                                    uncheckedTrackColor = ext.surfaceSubtle
                                 )
                             )
                         }
@@ -552,10 +493,10 @@ fun SettingsScreen(
 
                     Spacer(Modifier.height(12.dp))
 
-                    // Cloud token
-                    Text("Daemon Token", style = PocketType.Label, color = ext.textSecondary)
+                    // Cloud token (OPTIONAL — codespace URL is already unguessable)
+                    Text("Daemon Token (optional)", style = PocketType.Label, color = ext.textSecondary)
                     Text(
-                        "From ~/.pocketagent/token inside the codespace",
+                        "Leave empty — the codespace URL is already unguessable. Only set this if you enabled the token env var in the codespace.",
                         style = PocketType.BodySmall,
                         color = ext.textTertiary,
                         modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)
@@ -564,7 +505,7 @@ fun SettingsScreen(
                         value = state.cloudToken,
                         onValueChange = { viewModel.onCloudTokenChange(it) },
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("token from codespace") },
+                        placeholder = { Text("(leave empty)") },
                         textStyle = PocketType.BodyMedium,
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
@@ -744,33 +685,6 @@ fun SettingsScreen(
                     }
                 }
 
-                // Advanced section (v4.5: collapsed by default)
-                var showAdvanced by remember { mutableStateOf(false) }
-                Surface(
-                    onClick = { showAdvanced = !showAdvanced },
-                    color = ext.surfaceSubtle,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Advanced Settings", style = PocketType.BodyMedium, color = ext.textPrimary, modifier = Modifier.weight(1f))
-                        Icon(imageVector = if (showAdvanced) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, contentDescription = null, tint = ext.textTertiary)
-                    }
-                }
-                if (showAdvanced) {
-                    Section(title = "Skills") {
-                        val allSkills = listOf("build-website" to "Build websites", "build-apk" to "Build APKs", "research-topic" to "Research", "write-script" to "Write scripts", "make-chart" to "Charts", "debug-code" to "Debug", "summarize-document" to "Summarize", "convert-file" to "Convert", "data-analysis" to "Analyze", "file-management" to "Files", "install-java" to "JDK")
-                        val disabled = remember(state.disabledSkills) { state.disabledSkills.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet() }
-                        Text("Toggle skills on/off to save tokens.", style = PocketType.BodySmall, color = ext.textSecondary, modifier = Modifier.padding(bottom = 8.dp))
-                        allSkills.forEach { (id, name) ->
-                            val enabled = id !in disabled
-                            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(name, style = PocketType.BodyMedium, color = if (enabled) ext.textPrimary else ext.textTertiary, modifier = Modifier.weight(1f))
-                                androidx.compose.material3.Switch(checked = enabled, onCheckedChange = { c -> val cur = disabled.toMutableSet(); if (!c) cur.add(id) else cur.remove(id); viewModel.onDisabledSkillsChange(cur.joinToString(",")) }, colors = androidx.compose.material3.SwitchDefaults.colors(checkedThumbColor = ext.accent, checkedTrackColor = ext.accent.copy(alpha = 0.3f)))
-                            }
-                        }
-                    }
-                }
 
                 // About section
                 Section(title = "About") {

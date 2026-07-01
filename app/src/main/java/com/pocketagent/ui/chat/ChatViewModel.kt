@@ -54,7 +54,12 @@ data class ChatUiState(
     val error: String? = null,
     val sidebarOpen: Boolean = false,
     val showNewChatWarning: Boolean = false,
-    val pendingAttachments: List<Attachment> = emptyList()
+    val pendingAttachments: List<Attachment> = emptyList(),
+    // v7: cloud + mode
+    val agentMode: String = "TASK",
+    val cloudConnected: Boolean = false,
+    val cloudStatus: com.pocketagent.cloud.CloudState.Status = com.pocketagent.cloud.CloudState.Status.DISCONNECTED,
+    val cloudError: String? = null
 ) {
     data class VisibleToolCall(
         val toolCallId: String,
@@ -97,11 +102,47 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             // load() is idempotent — safe to call from any ViewModel
             settings.load()
+            // v7: observe agent mode
+            _state.update { it.copy(agentMode = settings.settings.value.agentMode) }
             // Observe conversations list for sidebar
-            conversationDao.observeAll().collect { convs ->
-                _state.update { it.copy(conversations = convs) }
+            launch {
+                conversationDao.observeAll().collect { convs ->
+                    _state.update { it.copy(conversations = convs) }
+                }
+            }
+            // v7: Observe cloud state
+            launch {
+                cloud.state.state.collect { cs ->
+                    _state.update {
+                        it.copy(
+                            cloudConnected = cs.status == com.pocketagent.cloud.CloudState.Status.CONNECTED,
+                            cloudStatus = cs.status,
+                            cloudError = cs.lastError,
+                            agentMode = settings.settings.value.agentMode
+                        )
+                    }
+                }
+            }
+            // v7: Observe settings changes (for mode toggle)
+            launch {
+                settings.settings.collect { s ->
+                    _state.update { it.copy(agentMode = s.agentMode) }
+                }
             }
         }
+    }
+
+    /** v7: Switch between CHAT and TASK mode. */
+    fun onAgentModeChange(mode: String) {
+        viewModelScope.launch {
+            settings.updateSettings { it.copy(agentMode = mode) }
+            _state.update { it.copy(agentMode = mode) }
+        }
+    }
+
+    /** v7: Refresh cloud connection. */
+    fun refreshCloudConnection() {
+        viewModelScope.launch { cloud.refreshState() }
     }
 
     /**

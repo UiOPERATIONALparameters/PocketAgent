@@ -191,6 +191,23 @@ fun ChatScreen(
                 onOpenFiles = onOpenFiles
             )
 
+            // v7: Mode switcher (Chat ↔ Task) with connection status
+            ModeSwitcher(
+                currentMode = if (state.agentMode == "CHAT") com.pocketagent.cloud.CloudState.Mode.CHAT else com.pocketagent.cloud.CloudState.Mode.TASK,
+                onModeChange = { mode ->
+                    viewModel.onAgentModeChange(if (mode == com.pocketagent.cloud.CloudState.Mode.CHAT) "CHAT" else "TASK")
+                },
+                cloudConnected = state.cloudConnected
+            )
+            // Connection banner (shows if cloud is disconnected in Task mode)
+            if (state.agentMode == "TASK") {
+                ConnectionBanner(
+                    status = state.cloudStatus,
+                    lastError = state.cloudError,
+                    onRetry = viewModel::refreshCloudConnection
+                )
+            }
+
             // Messages list
             // v4.6: Group consecutive tool messages into collapsed summary cards
             val groupedMessages = remember(state.messages) { groupConsecutiveTools(state.messages) }
