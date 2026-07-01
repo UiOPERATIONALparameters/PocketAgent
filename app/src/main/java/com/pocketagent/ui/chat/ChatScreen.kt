@@ -96,34 +96,35 @@ fun ChatScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     var userScrolledUp by remember { mutableStateOf(false) }
+    var lastMessageCount by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
 
-    // v4.0 FIX: Auto-scroll — SIMPLE and RELIABLE.
-    // Only auto-scroll when NEW messages are added (not on every content update).
-    // User can freely scroll up during streaming — auto-scroll won't fight them.
-    // User scrolls back to bottom → auto-scroll resumes.
+    // v4.1 SCROLL FIX: Only auto-scroll when TRULY at the bottom.
+    // The old code auto-scrolled on every new message, fighting the user.
+    // New logic: check if user is at the VERY LAST item before scrolling.
     LaunchedEffect(state.messages.size) {
-        // Only auto-scroll when a new message is added AND user is at/near bottom
-        if (!userScrolledUp) {
-            val target = state.messages.size - 1
-            if (target >= 0) {
-                listState.animateScrollToItem(target)
+        if (state.messages.size > lastMessageCount) {
+            // New message(s) added — only scroll if user was already at bottom
+            if (!userScrolledUp) {
+                val target = state.messages.size - 1
+                if (target >= 0) {
+                    listState.animateScrollToItem(target)
+                }
             }
         }
+        lastMessageCount = state.messages.size
     }
 
-    // Detect user scroll — but ONLY when user is actively dragging
-    // (not when auto-scroll moves the list programmatically)
+    // Detect user scroll position — only update userScrolledUp when user DRAGS
     androidx.compose.runtime.LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress }
             .distinctUntilChanged()
             .collect { scrolling ->
                 if (scrolling) {
-                    // User is scrolling — check position
                     val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
                     val totalItems = listState.layoutInfo.totalItemsCount
-                    if (totalItems > 0 && lastVisible >= totalItems - 2) {
-                        userScrolledUp = false  // at bottom — resume auto-scroll
+                    if (totalItems > 0 && lastVisible >= totalItems - 1) {
+                        userScrolledUp = false  // at very bottom — resume auto-scroll
                     } else {
                         userScrolledUp = true   // scrolled up — stop auto-scroll
                     }
@@ -654,7 +655,7 @@ private fun ToolCallCard(
     isRunning: Boolean = false
 ) {
     val context = LocalContext.current
-    // Auto-expand while running, collapse when done
+    // v4.1: Always collapsed by default — expand on tap only
     var expanded by remember(toolName, arguments, result) { mutableStateOf(false) }
     val ext = extendedColors()
 

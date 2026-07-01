@@ -164,6 +164,7 @@ class NativeEnvironmentManager @Inject constructor(
             createShSymlink()
             createHttpsAptMethod()  // v3.7: create https apt method symlink (missing from bootstrap)
             setupSslCerts()
+            setupGpgKeys()  // v4.1: copy Termux GPG keys to apt trusted keyring
             fixAptConfig()
             createCommandWrappers()
             createShellConfigs()
@@ -448,6 +449,30 @@ class NativeEnvironmentManager @Inject constructor(
         }
 
         if (sb.isNotEmpty()) caBundle.writeText(sb.toString())
+    }
+
+    /**
+     * v4.1: Copy Termux GPG signing keys to apt's trusted keyring directory.
+     * Without this, 'apt update' fails with NO_PUBKEY 5A897D96E57CF20C.
+     * The bootstrap ships keys in share/termux-keyring/ but apt looks in
+     * etc/apt/trusted.gpg.d/
+     */
+    private fun setupGpgKeys() {
+        val keyringSource = File(usrDir, "share/termux-keyring")
+        val trustedDir = File(usrDir, "etc/apt/trusted.gpg.d")
+        if (!trustedDir.exists()) trustedDir.mkdirs()
+
+        if (keyringSource.exists()) {
+            keyringSource.listFiles { f -> f.name.endsWith(".gpg") }?.forEach { gpgKey ->
+                val dest = File(trustedDir, gpgKey.name)
+                if (!dest.exists()) {
+                    try {
+                        gpgKey.copyTo(dest, overwrite = true)
+                        dest.setReadable(true, true)
+                    } catch (_: Exception) {}
+                }
+            }
+        }
     }
 
     /**
