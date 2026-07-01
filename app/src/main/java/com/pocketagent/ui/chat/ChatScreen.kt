@@ -479,13 +479,47 @@ private fun ChatMessageItem(msg: ChatMessageUi) {
     when (msg.role) {
         "user" -> UserBubble(msg.content)
         "assistant" -> AssistantBubble(msg.content, msg.reasoning)
-        "tool" -> ToolCallCard(
-            toolName = msg.toolName ?: "tool",
-            arguments = msg.toolArguments,
-            result = msg.toolResult,
-            display = msg.toolDisplay
-        )
+        "tool" -> {
+            // v4.4: Render todo tool results as a visual TodoListCard
+            if (msg.toolName == "todo" && msg.toolResult != null) {
+                val todoItems = parseTodoResult(msg.toolResult)
+                if (todoItems.isNotEmpty()) {
+                    TodoListCard(todos = todoItems)
+                } else {
+                    ToolCallCard(
+                        toolName = msg.toolName ?: "tool",
+                        arguments = msg.toolArguments,
+                        result = msg.toolResult,
+                        display = msg.toolDisplay
+                    )
+                }
+            } else {
+                ToolCallCard(
+                    toolName = msg.toolName ?: "tool",
+                    arguments = msg.toolArguments,
+                    result = msg.toolResult,
+                    display = msg.toolDisplay
+                )
+            }
+        }
         else -> UserBubble(msg.content)
+    }
+}
+
+/** Parse the todo tool's JSON result into TodoItem list for the UI card. */
+private fun parseTodoResult(resultJson: String): List<com.pocketagent.ui.chat.TodoItem> {
+    return try {
+        val obj = org.json.JSONObject(resultJson)
+        val todos = obj.optJSONArray("todos") ?: return emptyList()
+        (0 until todos.length()).map { i ->
+            val item = todos.getJSONObject(i)
+            com.pocketagent.ui.chat.TodoItem(
+                content = item.optString("content", ""),
+                status = item.optString("status", "pending")
+            )
+        }
+    } catch (_: Exception) {
+        emptyList()
     }
 }
 

@@ -172,6 +172,57 @@ class NativeEnvironmentManager @Inject constructor(
             // Create marker
             File(usrDir, MARKER_FILE).writeText(System.currentTimeMillis().toString())
 
+            // v4.4: Pre-install essential packages so the AI doesn't waste tokens
+            // running 'pkg install python git wget' on every conversation.
+            // This runs apt update + apt install for the essentials.
+            onProgress("Installing essential packages (python, git, wget)...", -1, -1)
+            try {
+                val env = arrayOf(
+                    "PREFIX=${usrDir.absolutePath}",
+                    "TERMUX_PREFIX=${usrDir.absolutePath}",
+                    "PATH=${binDir.absolutePath}:/system/bin:/system/xbin",
+                    "LD_LIBRARY_PATH=${libDir.absolutePath}",
+                    "APT_CONFIG=${etcDir.absolutePath}/apt/apt.conf",
+                    "DPKG_ADMINDIR=${usrDir.absolutePath}/var/lib/dpkg",
+                    "TMPDIR=${workspace.tmpDir.absolutePath}",
+                    "HOME=${workspace.homeDir.absolutePath}"
+                )
+                // Run apt update first
+                val updatePb = ProcessBuilder(
+                    "${usrDir.absolutePath}/bin/apt-get", "update"
+                )
+                    .directory(workspace.homeDir)
+                    .redirectErrorStream(true)
+                updatePb.environment().apply {
+                    env.forEach { e ->
+                        val (k, v) = e.split("=", limit = 2)
+                        put(k, v)
+                    }
+                }
+                val updateProc = updatePb.start()
+                updateProc.waitFor(120, java.util.concurrent.TimeUnit.SECONDS)
+                updateProc.destroyForcibly()
+
+                // Then install essentials
+                val installPb = ProcessBuilder(
+                    "${usrDir.absolutePath}/bin/apt-get", "install", "-y",
+                    "python", "git", "wget", "coreutils", "findutils", "grep", "tar", "make"
+                )
+                    .directory(workspace.homeDir)
+                    .redirectErrorStream(true)
+                installPb.environment().apply {
+                    env.forEach { e ->
+                        val (k, v) = e.split("=", limit = 2)
+                        put(k, v)
+                    }
+                }
+                val installProc = installPb.start()
+                installProc.waitFor(300, java.util.concurrent.TimeUnit.SECONDS)  // 5 min max
+                installProc.destroyForcibly()
+            } catch (_: Exception) {
+                // Non-fatal — the agent can install packages manually later
+            }
+
             // Clean up
             zipFile.delete()
 

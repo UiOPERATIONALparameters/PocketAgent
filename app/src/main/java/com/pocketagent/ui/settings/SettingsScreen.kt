@@ -563,6 +563,60 @@ fun SettingsScreen(
                     }
                 }
 
+                // Skills section (v4.4: toggle skills to save tokens)
+                Section(title = "Skills") {
+                    val allSkills = listOf(
+                        "build-website" to "Build websites",
+                        "build-apk" to "Build Android APKs",
+                        "research-topic" to "Research topics on web",
+                        "write-script" to "Write Python/Node/Bash scripts",
+                        "make-chart" to "Create charts and graphs",
+                        "debug-code" to "Debug code issues",
+                        "summarize-document" to "Summarize documents",
+                        "convert-file" to "Convert file formats",
+                        "data-analysis" to "Analyze data with pandas",
+                        "file-management" to "Organize and manage files",
+                        "install-java" to "Install JDK (seccomp workaround)"
+                    )
+                    val disabledSkills = remember(state.disabledSkills) {
+                        state.disabledSkills.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+                    }
+                    Text(
+                        "Toggle skills on/off. Disabled skills won't be loaded, saving tokens.",
+                        style = PocketType.BodySmall,
+                        color = ext.textSecondary,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    allSkills.forEach { (skillId, skillName) ->
+                        val isEnabled = skillId !in disabledSkills
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                skillName,
+                                style = PocketType.BodyMedium,
+                                color = if (isEnabled) ext.textPrimary else ext.textTertiary,
+                                modifier = Modifier.weight(1f)
+                            )
+                            androidx.compose.material3.Switch(
+                                checked = isEnabled,
+                                onCheckedChange = { checked ->
+                                    val current = disabledSkills.toMutableSet()
+                                    if (!checked) current.add(skillId) else current.remove(skillId)
+                                    viewModel.onDisabledSkillsChange(current.joinToString(","))
+                                },
+                                colors = androidx.compose.material3.SwitchDefaults.colors(
+                                    checkedThumbColor = ext.accent,
+                                    checkedTrackColor = ext.accent.copy(alpha = 0.3f)
+                                )
+                            )
+                        }
+                    }
+                }
+
                 // About section
                 Section(title = "About") {
                     Row(
