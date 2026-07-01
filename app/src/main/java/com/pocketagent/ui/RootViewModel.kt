@@ -15,7 +15,8 @@ import javax.inject.Inject
 data class RootState(
     val loading: Boolean = true,
     val onboardingComplete: Boolean = false,
-    val darkTheme: Boolean = false
+    val darkTheme: Boolean = false,
+    val focusMode: Boolean = true  // v6: eink aesthetic, default on
 )
 
 @HiltViewModel
@@ -48,7 +49,8 @@ class RootViewModel @Inject constructor(
                             AppSettings.ThemeMode.LIGHT -> false
                             AppSettings.ThemeMode.DARK -> true
                             AppSettings.ThemeMode.SYSTEM -> it.darkTheme
-                        }
+                        },
+                        focusMode = s.focusMode
                     )
                 }
                 return@launch
@@ -62,8 +64,24 @@ class RootViewModel @Inject constructor(
                         AppSettings.ThemeMode.LIGHT -> false
                         AppSettings.ThemeMode.DARK -> true
                         AppSettings.ThemeMode.SYSTEM -> it.darkTheme
-                    }
+                    },
+                    focusMode = s.focusMode
                 )
+            }
+
+            // v6: Observe settings changes so focus mode toggle in Settings
+            // immediately re-renders the theme (without requiring app restart).
+            settingsRepository.settings.collect { settings ->
+                _state.update {
+                    it.copy(
+                        focusMode = settings.focusMode,
+                        darkTheme = when (settings.themeMode) {
+                            AppSettings.ThemeMode.LIGHT -> false
+                            AppSettings.ThemeMode.DARK -> true
+                            AppSettings.ThemeMode.SYSTEM -> it.darkTheme
+                        }
+                    )
+                }
             }
         }
     }
@@ -73,5 +91,10 @@ class RootViewModel @Inject constructor(
             settingsRepository.updateSettings { it.copy(onboardingComplete = true) }
             _state.update { it.copy(onboardingComplete = true) }
         }
+    }
+
+    /** v6: Update focus mode at the root level so the theme re-renders immediately. */
+    fun updateFocusMode(enabled: Boolean) {
+        _state.update { it.copy(focusMode = enabled) }
     }
 }

@@ -44,7 +44,7 @@ fun PocketApp() {
     }
 
     val ext = extendedColors()
-    PocketTheme(darkTheme = state.darkTheme) {
+    PocketTheme(darkTheme = state.darkTheme, focusMode = state.focusMode) {
         Surface(color = ext.bg) {
             when {
                 state.loading -> {

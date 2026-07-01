@@ -423,7 +423,7 @@ fun SettingsScreen(
                                     color = ext.textPrimary
                                 )
                                 Text(
-                                    "Disables tools and uses minimal system prompt. Saves tokens for simple chat. Turn off for full agent mode.",
+                                    "Truncates tool results more aggressively and skips reasoning. Saves tokens for long sessions. Tools still work.",
                                     style = PocketType.BodySmall,
                                     color = ext.textSecondary,
                                     modifier = Modifier.padding(top = 2.dp)
@@ -437,7 +437,7 @@ fun SettingsScreen(
                                     viewModel.saveTokenSaveMode()
                                     Toast.makeText(
                                         context,
-                                        if (enabled) "Token save mode ON — tools disabled" else "Full agent mode ON — tools enabled",
+                                        if (enabled) "Token save mode ON — results truncated, reasoning hidden" else "Token save mode OFF — full output",
                                         Toast.LENGTH_SHORT
                                     ).show()
                                 },

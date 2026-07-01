@@ -13,6 +13,7 @@ import com.pocketagent.llm.ModelInfo
 import com.pocketagent.llm.StreamDelta
 import com.pocketagent.llm.ToolSpec
 import com.pocketagent.storage.ActiveProviderHolder
+import com.pocketagent.storage.prefs.SettingsRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -48,7 +49,8 @@ class AgentLoop @Inject constructor(
     private val bridge: TermuxBridge,
     private val contextManager: ContextManager,
     private val stateStore: StateStore,
-    private val activeProviderHolder: ActiveProviderHolder
+    private val activeProviderHolder: ActiveProviderHolder,
+    private val settings: SettingsRepository
 ) {
     data class Event(
         val type: Type,
@@ -395,7 +397,7 @@ class AgentLoop @Inject constructor(
         return result.substring(0, maxBytes) + "\n...[truncated, ${result.length - maxBytes} more chars]"
     }
 
-    private fun autoCompactThreshold(): Float = 0.7f
+    private fun autoCompactThreshold(): Float = settings.settings.value.autoCompactThreshold
 
     private suspend fun getModelMaxInputTokens(provider: LlmProvider, modelId: String): Int? {
         return try {

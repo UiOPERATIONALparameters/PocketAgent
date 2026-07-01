@@ -165,10 +165,24 @@ private val DarkColorScheme = darkColorScheme(
 @Composable
 fun PocketTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    focusMode: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
-    val extended = if (darkTheme) DarkExtendedColors else LightExtendedColors
+    // In focus mode, desaturate the palette further (more paper-like, less contrast on accents)
+    val baseExtended = if (darkTheme) DarkExtendedColors else LightExtendedColors
+    val extended = if (focusMode) {
+        baseExtended.copy(
+            // Soften the accent — make it closer to the text color (more muted)
+            accent = if (darkTheme) Color(0xFFB8B8B8) else Color(0xFF3A3A3A),
+            accentPressed = if (darkTheme) Color(0xFFC8C8C8) else Color(0xFF1A1A1A),
+            // Reduce status color saturation
+            success = if (darkTheme) Color(0xFF8FA89A) else Color(0xFF6A8A75),
+            error = if (darkTheme) Color(0xFF9A8585) else Color(0xFF7A5050),
+            warning = if (darkTheme) Color(0xFF9A8E75) else Color(0xFF6A5D3B),
+            info = if (darkTheme) Color(0xFF8A9AA8) else Color(0xFF5A7088)
+        )
+    } else baseExtended
 
     CompositionLocalProvider(LocalExtendedColors provides extended) {
         MaterialTheme(
