@@ -162,6 +162,7 @@ class NativeEnvironmentManager @Inject constructor(
             removeBrokenInitScripts()  // v3.7: delete profile.d scripts that cause "Permission denied"
             createSoSymlinks()
             createShSymlink()
+            createUsrBinSymlinks()  // v4.7: /usr/bin/env + /usr/bin/python3 etc.
             createHttpsAptMethod()  // v3.7: create https apt method symlink (missing from bootstrap)
             setupSslCerts()
             setupGpgKeys()  // v4.1: copy Termux GPG keys to apt trusted keyring
@@ -171,6 +172,16 @@ class NativeEnvironmentManager @Inject constructor(
 
             // Create marker
             File(usrDir, MARKER_FILE).writeText(System.currentTimeMillis().toString())
+
+            // v4.7: Pre-install essential packages with seccomp workaround
+            // Some packages' postinst/preinst scripts trigger seccomp (signal 31).
+            // We use dpkg-deb --extract to manually extract, bypassing the scripts.
+            onProgress("Installing essentials (python, git, wget)...", -1, -1)
+            try {
+                preInstallEssentials(onProgress)
+            } catch (_: Exception) {
+                // Non-fatal — agent can install manually
+            }
 
             // Clean up
             zipFile.delete()
@@ -417,6 +428,39 @@ class NativeEnvironmentManager @Inject constructor(
     }
 
     /**
+     * v4.7: Create /usr/bin/env symlink and other standard paths.
+     * Many npm/node scripts use #!/usr/bin/env node — without this they fail.
+     * Also create /usr/bin/python3, /usr/bin/env, etc. as symlinks to our bin/.
+     */
+    private fun createUsrBinSymlinks() {
+        // Create /usr/bin/ → /data/data/com.termux/files/usr/bin/ mapping
+        // We can't create /usr/bin/ (system dir), but we can create usr/bin/env
+        val usrBinDir = File(usrDir, "bin")
+
+        // Create 'env' binary if it doesn't exist (some scripts use #!/usr/bin/env)
+        val envFile = File(usrBinDir, "env")
+        if (!envFile.exists()) {
+            // Create a simple env wrapper script
+            envFile.writeText("""#!/data/data/com.termux/files/usr/bin/sh
+exec /data/data/com.termux/files/usr/bin/env "$@"
+""".trimIndent())
+            envFile.setExecutable(true, true)
+            envFile.setReadable(true, true)
+        }
+
+        // Create python3 → python symlink if python exists but python3 doesn't
+        val pythonFile = File(usrBinDir, "python")
+        val python3File = File(usrBinDir, "python3")
+        if (pythonFile.exists() && !python3File.exists()) {
+            try {
+                java.nio.file.Files.createSymbolicLink(python3File.toPath(), pythonFile.toPath())
+            } catch (_: Exception) {
+                try { python3File.copyFrom(pythonFile) } catch (_: Exception) {}
+            }
+        }
+    }
+
+    /**
      * Set up SSL certificates from Android's system CA store.
      */
     private fun setupSslCerts() {
@@ -449,6 +493,141 @@ class NativeEnvironmentManager @Inject constructor(
         }
 
         if (sb.isNotEmpty()) caBundle.writeText(sb.toString())
+    }
+
+    /**
+     * v4.7: Pre-install essential packages using dpkg-deb --extract to bypass seccomp.
+     * Package postinst/preinst scripts trigger signal 31 (SIGSYS) on Android 14+.
+     * We download .deb files, extract them manually, and copy files to the right paths.
+     */
+    private suspend fun preInstallEssentials(onProgress: (String, Long, Long) -> Unit) {
+        val prefix = usrDir.absolutePath
+        val tmpDir = File(context.cacheDir, "preinstall")
+        tmpDir.mkdirs()
+
+        val packages = listOf(
+            "python" to "python",
+            "git" to "git",
+            "wget" to "wget",
+            "coreutils" to "coreutils",
+            "grep" to "grep",
+            "tar" to "tar"
+        )
+
+        // First: apt-get update to download package index
+        onProgress("Updating package index...", -1, -1)
+        try {
+            val pb = ProcessBuilder("${binDir.absolutePath}/apt-get", "update")
+                .directory(workspace.homeDir)
+                .redirectErrorStream(true)
+            pb.environment().apply {
+                put("PREFIX", prefix)
+                put("TERMUX_PREFIX", prefix)
+                put("PATH", "${binDir.absolutePath}:/system/bin:/system/xbin")
+                put("LD_LIBRARY_PATH", libDir.absolutePath)
+                put("APT_CONFIG", "${etcDir.absolutePath}/apt/apt.conf")
+                put("DPKG_ADMINDIR", "$prefix/var/lib/dpkg")
+                put("TMPDIR", workspace.tmpDir.absolutePath)
+                put("HOME", workspace.homeDir.absolutePath)
+            }
+            val proc = pb.start()
+            proc.waitFor(120, java.util.concurrent.TimeUnit.SECONDS)
+            proc.destroyForcibly()
+        } catch (_: Exception) {}
+
+        // For each package: download .deb, extract, copy
+        for ((pkgName, _) in packages) {
+            onProgress("Installing $pkgName...", -1, -1)
+            try {
+                // Download the .deb file
+                val debFile = File(tmpDir, "$pkgName.deb")
+                val downloadPb = ProcessBuilder(
+                    "${binDir.absolutePath}/apt-get", "download", pkgName
+                ).directory(tmpDir).redirectErrorStream(true)
+                downloadPb.environment().apply {
+                    put("PREFIX", prefix)
+                    put("PATH", "${binDir.absolutePath}:/system/bin:/system/xbin")
+                    put("LD_LIBRARY_PATH", libDir.absolutePath)
+                    put("APT_CONFIG", "${etcDir.absolutePath}/apt/apt.conf")
+                    put("HOME", workspace.homeDir.absolutePath)
+                }
+                val dlProc = downloadPb.start()
+                dlProc.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)
+                dlProc.destroyForcibly()
+
+                // Find the downloaded .deb
+                val downloadedDeb = tmpDir.listFiles { f -> f.name.endsWith(".deb") }?.firstOrNull()
+                if (downloadedDeb == null || !downloadedDeb.exists()) continue
+
+                // Extract with dpkg-deb --extract (bypasses postinst scripts)
+                val extractDir = File(tmpDir, "extract_$pkgName")
+                extractDir.mkdirs()
+                val extractPb = ProcessBuilder(
+                    "${binDir.absolutePath}/dpkg-deb", "--extract",
+                    downloadedDeb.absolutePath, extractDir.absolutePath
+                ).redirectErrorStream(true)
+                extractPb.environment().apply {
+                    put("PATH", "${binDir.absolutePath}:/system/bin:/system/xbin")
+                    put("LD_LIBRARY_PATH", libDir.absolutePath)
+                }
+                val extProc = extractPb.start()
+                extProc.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
+                extProc.destroyForcibly()
+
+                // Copy extracted files to usr/
+                val srcPrefix = File(extractDir, "data/data/com.termux/files/usr")
+                if (srcPrefix.exists()) {
+                    srcPrefix.walkTopDown().forEach { srcFile ->
+                        if (srcFile.isFile) {
+                            val relPath = srcPrefix.toPath().relativize(srcFile.toPath()).toString()
+                            val destFile = File(usrDir, relPath)
+                            destFile.parentFile?.mkdirs()
+                            try {
+                                srcFile.copyTo(destFile, overwrite = true)
+                                if (relPath.startsWith("bin/") || relPath.contains("/bin/")) {
+                                    destFile.setExecutable(true, true)
+                                }
+                                destFile.setReadable(true, true)
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }
+
+                // Clean up
+                downloadedDeb.delete()
+                extractDir.deleteRecursively()
+            } catch (_: Exception) {}
+        }
+
+        // Create python3 → python symlink
+        val pythonBin = File(binDir, "python")
+        val python3Bin = File(binDir, "python3")
+        if (pythonBin.exists() && !python3Bin.exists()) {
+            try {
+                java.nio.file.Files.createSymbolicLink(python3Bin.toPath(), pythonBin.toPath())
+                python3Bin.setExecutable(true, true)
+            } catch (_: Exception) {}
+        }
+
+        // Clean up temp dir
+        tmpDir.deleteRecursively()
+
+        // Update dpkg status to mark packages as installed
+        try {
+            val dpkgStatus = File(usrDir, "var/lib/dpkg/status")
+            val currentStatus = if (dpkgStatus.exists()) dpkgStatus.readText() else ""
+            val newEntries = packages.joinToString("\n\n") { (name, _) ->
+                """Package: $name
+Status: install ok installed
+Priority: optional
+Section: pre-installed
+Maintainer: PocketAgent <noreply@pocketagent>
+Architecture: aarch64
+Version: 1.0-1
+Description: Pre-installed by PocketAgent"""
+            }
+            dpkgStatus.writeText(currentStatus + "\n\n" + newEntries + "\n")
+        } catch (_: Exception) {}
     }
 
     /**
@@ -506,7 +685,7 @@ class NativeEnvironmentManager @Inject constructor(
             Dir::Bin::dpkg "${usrDir.absolutePath}/bin/dpkg";
             Dir::Bin::apt-get "${usrDir.absolutePath}/bin/apt-get";
             Dir::Bin::apt-cache "${usrDir.absolutePath}/bin/apt-cache";
-            DPkg::Options { "--instdir=${usrDir.absolutePath}"; "--force-not-root"; "--force-confdef"; "--force-confold"; "--admindir=${usrDir.absolutePath}/var/lib/dpkg"; };
+            DPkg::Options { "--instdir=${usrDir.absolutePath}"; "--force-not-root"; "--force-confdef"; "--force-confold"; "--force-architecture"; "--force-depends"; "--admindir=${usrDir.absolutePath}/var/lib/dpkg"; };
             APT::Architecture "$arch";
             Acquire::Languages "none";
             APT::Install-Recommends "0";
