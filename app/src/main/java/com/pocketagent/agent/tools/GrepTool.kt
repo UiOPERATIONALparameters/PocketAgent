@@ -24,7 +24,7 @@ class GrepTool @Inject constructor(
 
     override val name = "grep"
     override val description = """
-        Search file contents with regex under a path in $HOME.
+        Search file contents with regex under a path in ${'$'}HOME.
         Returns matching lines with file:line:content format.
         Caps at 50 results. Uses ripgrep if installed (fast), else grep -rHn.
         Searches dotfiles by default; skips only .git/ directory.

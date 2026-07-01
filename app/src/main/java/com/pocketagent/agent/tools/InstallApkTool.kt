@@ -21,7 +21,7 @@ import javax.inject.Singleton
 /**
  * v6: install_apk tool — installs an APK from the Termux home directory.
  *
- * The APK lives in Termux's $HOME (e.g., ~/projects/myapp/app/build/outputs/apk/...).
+ * The APK lives in Termux's ${'$'}HOME (e.g., ~/projects/myapp/app/build/outputs/apk/...).
  * We download it via the daemon to the app's cache dir, then use ACTION_VIEW with
  * the system installer (the user must confirm).
  */
@@ -37,7 +37,7 @@ class InstallApkTool @Inject constructor(
         Use this after building an APK with gradle or downloading one via curl.
         The user will see a system "Install app" dialog and must confirm.
 
-        Path is relative to $HOME in Termux (or absolute under $HOME).
+        Path is relative to ${'$'}HOME in Termux (or absolute under ${'$'}HOME).
         The file must be a valid signed APK (.apk extension).
     """.trimIndent()
 
@@ -47,7 +47,7 @@ class InstallApkTool @Inject constructor(
           "properties": {
             "path": {
               "type": "string",
-              "description": "Path to the APK file (under $HOME in Termux)"
+              "description": "Path to the APK file (under ${'$'}HOME in Termux)"
             }
           },
           "required": ["path"]

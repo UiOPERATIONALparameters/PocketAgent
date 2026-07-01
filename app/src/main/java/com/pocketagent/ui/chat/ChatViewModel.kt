@@ -11,6 +11,7 @@ import com.pocketagent.storage.db.ConversationEntity
 import com.pocketagent.storage.db.MessageDao
 import com.pocketagent.storage.db.MessageEntity
 import com.pocketagent.storage.db.ToolRunDao
+import com.pocketagent.storage.db.toLlm
 import com.pocketagent.storage.db.ToolRunEntity
 import com.pocketagent.storage.prefs.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -791,64 +792,6 @@ class ChatViewModel @Inject constructor(
             isStreaming = isStreaming,
             createdAt = createdAt
         )
-    }
-
-    private fun MessageEntity.toLlm(): ChatMessage = when (role) {
-        "user" -> {
-            // Check if there are multimodal content parts stored in toolCallsJson (repurposed field)
-            val parts = toolCallsJson?.let { jsonStr ->
-                try {
-                    json.decodeFromString(
-                        kotlinx.serialization.builtins.ListSerializer(ChatMessage.ContentPart.serializer()),
-                        jsonStr
-                    )
-                } catch (_: Exception) { null }
-            }
-            if (parts != null) {
-                ChatMessage(
-                    role = ChatMessage.Role.User,
-                    content = content,
-                    contentParts = parts
-                )
-            } else {
-                ChatMessage(role = ChatMessage.Role.User, content = content)
-            }
-        }
-        "assistant" -> {
-            // CRITICAL: Reconstruct tool_calls array from toolCallsJson
-            // This is needed so the LLM API sees: assistant { tool_calls: [...] }
-            // before the tool result messages.
-            val toolCalls = toolCallsJson?.let { jsonStr ->
-                try {
-                    json.decodeFromString(
-                        kotlinx.serialization.builtins.ListSerializer(ChatMessage.ToolCall.serializer()),
-                        jsonStr
-                    )
-                } catch (_: Exception) { null }
-            }
-            if (toolCalls != null && toolCalls.isNotEmpty()) {
-                ChatMessage(
-                    role = ChatMessage.Role.Assistant,
-                    content = content,
-                    reasoning = reasoning,
-                    toolCalls = toolCalls
-                )
-            } else {
-                ChatMessage(
-                    role = ChatMessage.Role.Assistant,
-                    content = content,
-                    reasoning = reasoning
-                )
-            }
-        }
-        "tool" -> ChatMessage(
-            role = ChatMessage.Role.Tool,
-            content = content,
-            toolCallId = toolCallId,
-            name = toolName
-        )
-        "system" -> ChatMessage(role = ChatMessage.Role.System, content = content)
-        else -> ChatMessage(role = ChatMessage.Role.User, content = content ?: "")
     }
 
     private data class PendingToolCall(

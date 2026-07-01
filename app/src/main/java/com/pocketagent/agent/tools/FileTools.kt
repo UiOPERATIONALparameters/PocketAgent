@@ -17,7 +17,7 @@ import javax.inject.Singleton
 
 /**
  * v6: File tools route through the Termux daemon.
- * Path safety is enforced daemon-side (confined to $HOME, .. blocked).
+ * Path safety is enforced daemon-side (confined to ${'$'}HOME, .. blocked).
  */
 
 @Singleton
@@ -28,7 +28,7 @@ class FileReadTool @Inject constructor(
     override val name = "file_read"
     override val description = """
         Read the contents of a file from the Termux home directory.
-        Path is relative to $HOME. Use ~ or absolute paths under $HOME.
+        Path is relative to ${'$'}HOME. Use ~ or absolute paths under ${'$'}HOME.
         Returns up to 1MB of text content. Binary files return hex.
     """.trimIndent()
 
@@ -38,7 +38,7 @@ class FileReadTool @Inject constructor(
           "properties": {
             "path": {
               "type": "string",
-              "description": "Path to the file (relative to $HOME or absolute under $HOME)"
+              "description": "Path to the file (relative to ${'$'}HOME or absolute under ${'$'}HOME)"
             },
             "start_line": {
               "type": "integer",
@@ -115,7 +115,7 @@ class FileWriteTool @Inject constructor(
           "properties": {
             "path": {
               "type": "string",
-              "description": "Path to write (relative to $HOME or absolute under $HOME)"
+              "description": "Path to write (relative to ${'$'}HOME or absolute under ${'$'}HOME)"
             },
             "content": {
               "type": "string",
@@ -145,7 +145,7 @@ class FileWriteTool @Inject constructor(
         }
 
         if (response.error != null) {
-            return ToolResult.Error(response.error, "Check the path is under $HOME.")
+            return ToolResult.Error(response.error, "Check the path is under ${'$'}HOME.")
         }
 
         val output = buildJsonObject {
@@ -165,7 +165,7 @@ class FileListTool @Inject constructor(
 
     override val name = "file_list"
     override val description = """
-        List files and directories in a path under $HOME.
+        List files and directories in a path under ${'$'}HOME.
         Returns names, types, sizes, and modification times.
         Use path="~" for home directory, or any subdirectory.
     """.trimIndent()
@@ -198,7 +198,7 @@ class FileListTool @Inject constructor(
         }
 
         if (response.error != null) {
-            return ToolResult.Error(response.error, "Check the path is a directory under $HOME.")
+            return ToolResult.Error(response.error, "Check the path is a directory under ${'$'}HOME.")
         }
 
         val entriesArray = JsonArray(response.entries.map { entry ->

@@ -29,7 +29,7 @@ import javax.inject.Singleton
  * v6 is ~250 lines of HTTP/JSON. No path patching, no LD_PRELOAD, no seccomp workarounds.
  *
  * All execution happens in the user's real Termux. The AI gets the exact same
- * environment the user has — same packages, same $PATH, same git config.
+ * environment the user has — same packages, same ${'$'}PATH, same git config.
  */
 @Singleton
 class TermuxBridge @Inject constructor(
@@ -40,6 +40,7 @@ class TermuxBridge @Inject constructor(
     companion object {
         private const val DEFAULT_PORT = 8765
         private const val DEFAULT_HOST = "127.0.0.1"
+        val JSON = "application/json".toMediaType()
     }
 
     private val json = Json {
@@ -227,10 +228,6 @@ class TermuxBridge @Inject constructor(
             state.setError(e.message ?: e::class.simpleName ?: "Unknown error")
             Result.failure(e)
         }
-    }
-
-    companion object {
-        val JSON = "application/json".toMediaType()
     }
 }
 

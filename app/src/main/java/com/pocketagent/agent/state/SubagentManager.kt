@@ -7,6 +7,7 @@ import com.pocketagent.storage.db.ConversationDao
 import com.pocketagent.storage.db.ConversationEntity
 import com.pocketagent.storage.db.MessageDao
 import com.pocketagent.storage.db.MessageEntity
+import com.pocketagent.storage.db.toLlm
 import com.pocketagent.storage.prefs.SettingsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow

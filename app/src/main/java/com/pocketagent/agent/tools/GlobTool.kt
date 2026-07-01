@@ -23,7 +23,7 @@ class GlobTool @Inject constructor(
 
     override val name = "glob"
     override val description = """
-        Find files matching a glob pattern under a path in $HOME.
+        Find files matching a glob pattern under a path in ${'$'}HOME.
         Returns paths sorted by modification time (newest first). Caps at 100.
         Patterns supported: ** (recursive), * (any), ? (single char), [abc], {a,b}.
         Examples: **/*.kt, src/**/*.py, *.md, {test,spec}/*.js
@@ -60,8 +60,8 @@ class GlobTool @Inject constructor(
             append("' -type f -name '")
             append(findPattern.replace("'", "'\\''"))
             append("' 2>/dev/null | head -100 | while read -r f; do ")
-            append("mtime=$(stat -c %Y \"$f\" 2>/dev/null || stat -f %m \"$f\" 2>/dev/null || echo 0); ")
-            append("echo \"$mtime|$f\"; done | sort -rn | cut -d'|' -f2-")
+            append("mtime=\$(stat -c %Y \"\$f\" 2>/dev/null || stat -f %m \"\$f\" 2>/dev/null || echo 0); ")
+            append("echo \"\$mtime|\$f\"; done | sort -rn | cut -d'|' -f2-")
         }
 
         val result = bridge.exec(cmd, timeout = 30)

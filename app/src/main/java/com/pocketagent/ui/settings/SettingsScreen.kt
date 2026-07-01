@@ -450,17 +450,10 @@ fun SettingsScreen(
                     }
                 }
 
-                // Linux Environment section (v2.1 — Ubuntu via proot)
-                Section(title = "Linux Environment") {
-                    // Show ABI and distro info
-                    Text(
-                        "Architecture: ${state.linuxAbi} • Type: Termux Native (no proot)",
-                        style = PocketType.BodySmall,
-                        color = ext.textSecondary,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                    if (state.linuxInstalled) {
-                        // Installed state
+                // v6: Termux Bridge section
+                Section(title = "Termux Connection") {
+                    if (state.termuxConnected) {
+                        // Connected state
                         Surface(
                             color = ext.success.copy(alpha = 0.1f),
                             shape = RoundedCornerShape(12.dp),
@@ -468,12 +461,27 @@ fun SettingsScreen(
                         ) {
                             Column(modifier = Modifier.padding(12.dp)) {
                                 Text(
-                                    "Linux installed ✓",
+                                    "Connected to Termux ✓",
                                     style = PocketType.BodyMedium,
                                     color = ext.success
                                 )
+                                state.termuxVersion?.let {
+                                    Text(
+                                        "Daemon: v$it",
+                                        style = PocketType.BodySmall,
+                                        color = ext.textSecondary,
+                                        modifier = Modifier.padding(top = 4.dp)
+                                    )
+                                }
+                                state.termuxUser?.let {
+                                    Text(
+                                        "User: $it",
+                                        style = PocketType.BodySmall,
+                                        color = ext.textSecondary
+                                    )
+                                }
                                 Text(
-                                    "The AI has full bash + apt + pkg access. Can install python3, node, git, gcc, ffmpeg, anything via 'pkg install'.",
+                                    "The AI has full access to your Termux environment — same packages, same \${'$'}PATH, same git config.",
                                     style = PocketType.BodySmall,
                                     color = ext.textSecondary,
                                     modifier = Modifier.padding(top = 4.dp)
@@ -482,86 +490,179 @@ fun SettingsScreen(
                         }
                         Spacer(Modifier.height(8.dp))
                         Surface(
-                            onClick = {
-                                viewModel.uninstallLinux()
-                                Toast.makeText(context, "Linux environment removed", Toast.LENGTH_SHORT).show()
-                            },
-                            color = ext.error.copy(alpha = 0.08f),
+                            onClick = { viewModel.refreshTermuxConnection() },
+                            color = ext.surfaceSubtle,
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
-                                "Remove Linux Environment",
+                                "Refresh Connection",
                                 style = PocketType.BodyMedium,
-                                color = ext.error,
+                                color = ext.textPrimary,
                                 modifier = Modifier.padding(14.dp)
                             )
                         }
-                    } else if (state.linuxInstalling) {
-                        // Installing state
-                        Surface(
-                            color = ext.accent.copy(alpha = 0.1f),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Text(
-                                    state.linuxStatus,
-                                    style = PocketType.BodyMedium,
-                                    color = ext.accent
-                                )
-                                Spacer(Modifier.height(8.dp))
-                                androidx.compose.material3.LinearProgressIndicator(
-                                    progress = { if (state.linuxProgress >= 0) state.linuxProgress else 0f },
-                                    color = ext.accent,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
-                        }
                     } else {
-                        // Not installed state
+                        // Disconnected state
                         Surface(
-                            color = ext.surfaceSubtle,
+                            color = ext.error.copy(alpha = 0.08f),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(modifier = Modifier.padding(12.dp)) {
                                 Text(
-                                    "Install Full Linux Environment",
+                                    "Termux not connected",
                                     style = PocketType.BodyMedium,
-                                    color = ext.textPrimary
+                                    color = ext.error
                                 )
                                 Text(
-                                    "Downloads ~40MB one-time. Gives the AI a native Linux environment (no proot, no root needed): bash, apt, pkg, curl + can install python3, node, git, gcc, ffmpeg, anything via 'pkg install'.",
+                                    "To enable bash commands, install Termux from F-Droid and run the installer:",
                                     style = PocketType.BodySmall,
                                     color = ext.textSecondary,
                                     modifier = Modifier.padding(top = 4.dp)
                                 )
+                                Spacer(Modifier.height(8.dp))
+                                Surface(
+                                    color = ext.surfaceSubtle,
+                                    shape = RoundedCornerShape(6.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        "curl -sL https://raw.githubusercontent.com/UiOPERATIONALparameters/PocketAgent/v6-termux-bridge/termux-daemon/install.sh | bash",
+                                        style = PocketType.CodeSmall,
+                                        color = ext.textPrimary,
+                                        modifier = Modifier.padding(8.dp)
+                                    )
+                                }
                             }
                         }
-                        Spacer(Modifier.height(8.dp))
-                        Surface(
-                            onClick = { viewModel.installLinux() },
-                            color = ext.accent,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(14.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Install Linux", style = PocketType.BodyMedium, color = ext.textOnAccent)
-                            }
-                        }
-                        if (state.linuxStatus.isNotEmpty()) {
-                            Spacer(Modifier.height(8.dp))
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "Termux Token",
+                        style = PocketType.Label,
+                        color = ext.textSecondary
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedTextField(
+                        value = state.termuxToken,
+                        onValueChange = { viewModel.onTermuxTokenChange(it) },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Paste token from ~/.pocketagent/token") },
+                        textStyle = PocketType.BodyMedium,
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = ext.textPrimary,
+                            unfocusedTextColor = ext.textPrimary,
+                            focusedBorderColor = ext.accent,
+                            unfocusedBorderColor = ext.divider
+                        )
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Surface(
+                        onClick = { viewModel.saveTermuxToken() },
+                        color = ext.accent,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            "Save Token & Connect",
+                            style = PocketType.BodyMedium,
+                            color = ext.textOnAccent,
+                            modifier = Modifier.padding(14.dp)
+                        )
+                    }
+                }
+
+                // v6: Agent Capabilities section
+                Section(title = "Agent Capabilities") {
+                    // Auto-compact threshold
+                    Text(
+                        "Auto-compact threshold: ${(state.autoCompactThreshold * 100).toInt()}%",
+                        style = PocketType.BodyMedium,
+                        color = ext.textPrimary
+                    )
+                    Text(
+                        "Conversation is auto-summarized when it reaches this % of the model's context window.",
+                        style = PocketType.BodySmall,
+                        color = ext.textSecondary,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
+                    )
+                    androidx.compose.material3.Slider(
+                        value = state.autoCompactThreshold,
+                        onValueChange = { viewModel.onAutoCompactThresholdChange(it) },
+                        valueRange = 0.5f..0.9f,
+                        steps = 7,
+                        onValueChangeFinished = { viewModel.saveAutoCompactThreshold() },
+                        colors = androidx.compose.material3.SliderDefaults.colors(
+                            thumbColor = ext.accent,
+                            activeTrackColor = ext.accent
+                        )
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+                    // Subagents toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                state.linuxStatus,
+                                "Enable subagents (task tool)",
+                                style = PocketType.BodyMedium,
+                                color = ext.textPrimary
+                            )
+                            Text(
+                                "Allow the AI to spawn subagents for delegated work.",
                                 style = PocketType.BodySmall,
-                                color = ext.error
+                                color = ext.textSecondary
                             )
                         }
+                        androidx.compose.material3.Switch(
+                            checked = state.enableSubagents,
+                            onCheckedChange = {
+                                viewModel.onEnableSubagentsChange(it)
+                                viewModel.saveEnableSubagents()
+                            },
+                            colors = androidx.compose.material3.SwitchDefaults.colors(
+                                checkedThumbColor = ext.accent,
+                                checkedTrackColor = ext.accent.copy(alpha = 0.3f)
+                            )
+                        )
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                    // Focus mode toggle (eink aesthetic)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Focus mode (eink aesthetic)",
+                                style = PocketType.BodyMedium,
+                                color = ext.textPrimary
+                            )
+                            Text(
+                                "Reduces contrast and decoration for a calmer reading experience.",
+                                style = PocketType.BodySmall,
+                                color = ext.textSecondary
+                            )
+                        }
+                        androidx.compose.material3.Switch(
+                            checked = state.focusMode,
+                            onCheckedChange = {
+                                viewModel.onFocusModeChange(it)
+                                viewModel.saveFocusMode()
+                            },
+                            colors = androidx.compose.material3.SwitchDefaults.colors(
+                                checkedThumbColor = ext.accent,
+                                checkedTrackColor = ext.accent.copy(alpha = 0.3f)
+                            )
+                        )
                     }
                 }
 

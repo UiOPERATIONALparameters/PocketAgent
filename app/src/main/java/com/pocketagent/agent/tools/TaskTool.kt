@@ -5,6 +5,7 @@ import com.pocketagent.agent.state.SubagentManager
 import com.pocketagent.llm.ToolSpec
 import com.pocketagent.storage.ActiveProviderHolder
 import com.pocketagent.storage.prefs.SettingsRepository
+import dagger.Lazy
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -31,11 +32,14 @@ import javax.inject.Singleton
  *
  * The subagent has access to all the same tools (bash, file_*, grep, etc.) but
  * with a smaller tool budget (default 15 vs parent's 50).
+ *
+ * Note: Uses dagger.Lazy<AgentLoop> to break the DI cycle
+ * (AgentLoop → ToolRouter → TaskTool → AgentLoop).
  */
 @Singleton
 class TaskTool @Inject constructor(
     private val subagentManager: SubagentManager,
-    private val agentLoop: AgentLoop,
+    private val agentLoopProvider: Lazy<AgentLoop>,
     private val settings: SettingsRepository,
     private val activeProviderHolder: ActiveProviderHolder
 ) : AgentTool {
@@ -108,7 +112,7 @@ class TaskTool @Inject constructor(
             modelId = modelId,
             description = description,
             prompt = prompt,
-            agentLoop = agentLoop,
+            agentLoop = agentLoopProvider.get(),
             maxIterations = maxIter
         )
 

@@ -15,7 +15,7 @@ import javax.inject.Singleton
  * v6: serve_http tool — starts an HTTP server in Termux via `python3 -m http.server`.
  *
  * Much simpler than v5's in-JVM HTTP server. The server runs in the user's real
- * Termux, has access to all files, and can serve any directory under $HOME.
+ * Termux, has access to all files, and can serve any directory under ${'$'}HOME.
  *
  * The user opens http://localhost:PORT in their phone browser to view the site.
  */
@@ -64,11 +64,11 @@ class ServeHttpTool @Inject constructor(
             "start" -> {
                 // Start python http.server in the background
                 // nohup + & to detach, write PID to a file for later stop
-                val cmd = """
-                    cd '$directory' 2>/dev/null || cd ~
-                    nohup python3 -m http.server $port >/dev/null 2>&1 &
-                    echo $!
-                """.trimIndent()
+                val cmd = buildString {
+                    append("cd '$directory' 2>/dev/null || cd ~; ")
+                    append("nohup python3 -m http.server $port >/dev/null 2>&1 & ")
+                    append("echo \$!")
+                }
                 val result = bridge.exec(cmd, timeout = 5)
                 val response = result.getOrElse { e ->
                     return ToolResult.Error("Bridge error: ${e.message}", "Check Termux daemon is running.")
@@ -86,18 +86,14 @@ class ServeHttpTool @Inject constructor(
             }
             "stop" -> {
                 // Find and kill the process listening on this port
-                val cmd = """
-                    pids=$(ss -tlnp 2>/dev/null | grep ':$port ' | grep -oP 'pid=\K[0-9]+' || true)
-                    if [ -z "$pids" ]; then
-                        pids=$(netstat -tlnp 2>/dev/null | grep ':$port ' | awk '{print $NF}' | cut -d/ -f1 || true)
-                    fi
-                    if [ -z "$pids" ]; then
-                        echo "no server on port $port"
-                    else
-                        for pid in $pids; do kill $pid 2>/dev/null; done
-                        echo "stopped"
-                    fi
-                """.trimIndent()
+                val cmd = buildString {
+                    append("pids=\$(ss -tlnp 2>/dev/null | grep ':$port ' | grep -oP 'pid=\\K[0-9]+' || true); ")
+                    append("if [ -z \"\$pids\" ]; then ")
+                    append("pids=\$(netstat -tlnp 2>/dev/null | grep ':$port ' | awk '{print \$NF}' | cut -d/ -f1 || true); ")
+                    append("fi; ")
+                    append("if [ -z \"\$pids\" ]; then echo \"no server on port $port\"; ")
+                    append("else for pid in \$pids; do kill \$pid 2>/dev/null; done; echo \"stopped\"; fi")
+                }
                 val result = bridge.exec(cmd, timeout = 5)
                 val response = result.getOrElse { e ->
                     return ToolResult.Error("Bridge error: ${e.message}", "Check Termux daemon is running.")
@@ -112,9 +108,10 @@ class ServeHttpTool @Inject constructor(
                 else ToolResult.Error("No server running on port $port", "Use 'list' to see running servers.")
             }
             "list" -> {
-                val cmd = """
-                    ss -tlnp 2>/dev/null | grep 'python' | awk '{print $4, $6}' || netstat -tlnp 2>/dev/null | grep 'python' | awk '{print $4, $6}' || echo "(none)"
-                """.trimIndent()
+                val cmd = buildString {
+                    append("ss -tlnp 2>/dev/null | grep 'python' | awk '{print \$4, \$6}' || ")
+                    append("netstat -tlnp 2>/dev/null | grep 'python' | awk '{print \$4, \$6}' || echo \"(none)\"")
+                }
                 val result = bridge.exec(cmd, timeout = 5)
                 val response = result.getOrElse { e ->
                     return ToolResult.Error("Bridge error: ${e.message}", "Check Termux daemon is running.")

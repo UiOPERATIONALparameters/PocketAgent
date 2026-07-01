@@ -24,11 +24,11 @@ class StrReplaceTool @Inject constructor(
     override val description = """
         Perform exact string replacements in an existing file. PREFERRED over file_write for editing.
         old_str must appear EXACTLY once (unless replace_all=true). Fails if not found.
-        Path is relative to $HOME in Termux.
+        Path is relative to ${'$'}HOME in Termux.
     """.trimIndent()
 
     override val parametersSchema = """
-        {"type":"object","properties":{"path":{"type":"string","description":"Path to file (under $HOME)"},"old_str":{"type":"string","description":"Exact string to find"},"new_str":{"type":"string","description":"Replacement string"},"replace_all":{"type":"boolean","default":false}},"required":["path","old_str","new_str"]}
+        {"type":"object","properties":{"path":{"type":"string","description":"Path to file (under ${'$'}HOME)"},"old_str":{"type":"string","description":"Exact string to find"},"new_str":{"type":"string","description":"Replacement string"},"replace_all":{"type":"boolean","default":false}},"required":["path","old_str","new_str"]}
     """.trimIndent()
 
     override suspend fun execute(arguments: kotlinx.serialization.json.JsonElement): ToolResult {

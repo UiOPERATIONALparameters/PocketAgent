@@ -21,7 +21,7 @@ import javax.inject.Singleton
  * Android-OS-fighting code) with a single HTTP call to the Termux daemon.
  *
  * The AI gets the EXACT same environment the user has in Termux:
- *   - Same $PATH, same installed packages
+ *   - Same ${'$'}PATH, same installed packages
  *   - Same ~/.gitconfig, same ssh keys
  *   - Same ~/.bashrc, same aliases
  *   - Real bash, real coreutils, real apt/pkg
@@ -40,7 +40,7 @@ class BashTool @Inject constructor(
     override val name = "bash"
     override val description = """
         Run a bash command in the agent's Termux environment (real Linux on the user's phone).
-        This is the user's actual Termux — same packages, same $PATH, same git config.
+        This is the user's actual Termux — same packages, same ${'$'}PATH, same git config.
 
         Available commands (everything the user has in Termux):
         - coreutils: ls, cat, echo, mkdir, rm, cp, mv, ln, chmod, find, head, tail, wc, sort, uniq, tr, cut
@@ -54,7 +54,7 @@ class BashTool @Inject constructor(
         Install new packages with: pkg install <name>
         Examples: pkg install python nodejs git gcc ffmpeg
 
-        The workspace is the user's $HOME in Termux. All commands run there.
+        The workspace is the user's ${'$'}HOME in Termux. All commands run there.
         Commands run with a configurable timeout (default 30s, max 600s).
     """.trimIndent()
 
@@ -73,7 +73,7 @@ class BashTool @Inject constructor(
             },
             "cwd": {
               "type": "string",
-              "description": "Optional working directory (default: $HOME)",
+              "description": "Optional working directory (default: ${'$'}HOME)",
               "default": "~"
             }
           },
