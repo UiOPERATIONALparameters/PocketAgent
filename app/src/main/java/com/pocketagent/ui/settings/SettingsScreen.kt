@@ -516,24 +516,62 @@ fun SettingsScreen(
                                     color = ext.error
                                 )
                                 Text(
-                                    "To enable bash commands, install Termux from F-Droid and run the installer:",
+                                    "1. Install Termux from F-Droid",
+                                    style = PocketType.BodySmall,
+                                    color = ext.textSecondary,
+                                    modifier = Modifier.padding(top = 8.dp)
+                                )
+                                Text(
+                                    "2. Open Termux and run this command:",
                                     style = PocketType.BodySmall,
                                     color = ext.textSecondary,
                                     modifier = Modifier.padding(top = 4.dp)
                                 )
                                 Spacer(Modifier.height(8.dp))
+                                // Command with Copy button
+                                val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+                                val context = androidx.compose.ui.platform.LocalContext.current
+                                var copied by remember { mutableStateOf(false) }
+                                val installCmd = "curl -sL https://tinyurl.com/266a3atb | bash"
                                 Surface(
                                     color = ext.surfaceSubtle,
-                                    shape = RoundedCornerShape(6.dp),
+                                    shape = RoundedCornerShape(8.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text(
-                                        "curl -sL https://raw.githubusercontent.com/UiOPERATIONALparameters/PocketAgent/v6-termux-bridge/termux-daemon/install.sh | bash",
-                                        style = PocketType.CodeSmall,
-                                        color = ext.textPrimary,
-                                        modifier = Modifier.padding(8.dp)
-                                    )
+                                    Row(
+                                        modifier = Modifier.padding(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            installCmd,
+                                            style = PocketType.CodeSmall,
+                                            color = ext.textPrimary,
+                                            modifier = Modifier.weight(1f).padding(end = 8.dp)
+                                        )
+                                        Surface(
+                                            onClick = {
+                                                clipboard.setText(androidx.compose.ui.text.AnnotatedString(installCmd))
+                                                copied = true
+                                                Toast.makeText(context, "Copied! Paste in Termux now", Toast.LENGTH_SHORT).show()
+                                            },
+                                            color = if (copied) ext.success else ext.accent,
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text(
+                                                if (copied) "✓" else "Copy",
+                                                style = PocketType.Label,
+                                                color = ext.textOnAccent,
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                            )
+                                        }
+                                    }
                                 }
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    "3. Copy the token the installer prints, paste it below, tap Save",
+                                    style = PocketType.BodySmall,
+                                    color = ext.textSecondary
+                                )
                             }
                         }
                     }
