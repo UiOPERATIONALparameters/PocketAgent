@@ -190,6 +190,9 @@ fun ChatScreen(
             )
 
             // Messages list
+            // v4.6: Group consecutive tool messages into collapsed summary cards
+            val groupedMessages = remember(state.messages) { groupConsecutiveTools(state.messages) }
+
             if (state.messages.isEmpty() && state.streamingContent.isEmpty() && !state.isAgentRunning) {
                 // CRITICAL: Use weight(1f) so EmptyChatState doesn't consume all
                 // vertical space and push the composer off-screen
@@ -205,8 +208,6 @@ fun ChatScreen(
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // v4.6: Group consecutive tool messages into collapsed summary cards
-                    val groupedMessages = remember(state.messages) { groupConsecutiveTools(state.messages) }
                     items(groupedMessages, key = { it.id }) { item ->
                         when (item) {
                             is GroupedMessage.Single -> ChatMessageItem(item.msg)
