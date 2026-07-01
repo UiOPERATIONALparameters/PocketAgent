@@ -35,7 +35,8 @@ data class SettingsUiState(
     val linuxInstalling: Boolean = false,
     val linuxProgress: Float = 0f,
     val linuxStatus: String = "",
-    val linuxAbi: String = ""
+    val linuxAbi: String = "",
+    val disabledSkills: String = ""
 )
 
 @HiltViewModel
@@ -96,6 +97,7 @@ class SettingsViewModel @Inject constructor(
     fun onWorkspaceQuotaChange(mb: Int) = _state.update { it.copy(workspaceQuotaMb = mb) }
     fun onMaxIterationsChange(iterations: Int) = _state.update { it.copy(maxToolIterations = iterations) }
     fun onTokenSaveModeChange(enabled: Boolean) = _state.update { it.copy(tokenSaveMode = enabled) }
+    fun onDisabledSkillsChange(skills: String) = _state.update { it.copy(disabledSkills = skills) }
 
     suspend fun save() {
         val s = _state.value

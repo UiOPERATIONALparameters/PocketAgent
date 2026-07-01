@@ -563,6 +563,34 @@ fun SettingsScreen(
                     }
                 }
 
+                // Advanced section (v4.5: collapsed by default)
+                var showAdvanced by remember { mutableStateOf(false) }
+                Surface(
+                    onClick = { showAdvanced = !showAdvanced },
+                    color = ext.surfaceSubtle,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Advanced Settings", style = PocketType.BodyMedium, color = ext.textPrimary, modifier = Modifier.weight(1f))
+                        Icon(imageVector = if (showAdvanced) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, contentDescription = null, tint = ext.textTertiary)
+                    }
+                }
+                if (showAdvanced) {
+                    Section(title = "Skills") {
+                        val allSkills = listOf("build-website" to "Build websites", "build-apk" to "Build APKs", "research-topic" to "Research", "write-script" to "Write scripts", "make-chart" to "Charts", "debug-code" to "Debug", "summarize-document" to "Summarize", "convert-file" to "Convert", "data-analysis" to "Analyze", "file-management" to "Files", "install-java" to "JDK")
+                        val disabled = remember(state.disabledSkills) { state.disabledSkills.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet() }
+                        Text("Toggle skills on/off to save tokens.", style = PocketType.BodySmall, color = ext.textSecondary, modifier = Modifier.padding(bottom = 8.dp))
+                        allSkills.forEach { (id, name) ->
+                            val enabled = id !in disabled
+                            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(name, style = PocketType.BodyMedium, color = if (enabled) ext.textPrimary else ext.textTertiary, modifier = Modifier.weight(1f))
+                                androidx.compose.material3.Switch(checked = enabled, onCheckedChange = { c -> val cur = disabled.toMutableSet(); if (!c) cur.add(id) else cur.remove(id); viewModel.onDisabledSkillsChange(cur.joinToString(",")) }, colors = androidx.compose.material3.SwitchDefaults.colors(checkedThumbColor = ext.accent, checkedTrackColor = ext.accent.copy(alpha = 0.3f)))
+                            }
+                        }
+                    }
+                }
+
                 // About section
                 Section(title = "About") {
                     Row(

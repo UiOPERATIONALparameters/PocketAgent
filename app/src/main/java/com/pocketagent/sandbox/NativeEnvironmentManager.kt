@@ -935,9 +935,11 @@ exec "${usrDir.absolutePath}/bin/apt" "$@"
             val client = OkHttpClient.Builder()
                 .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
                 .readTimeout(600, java.util.concurrent.TimeUnit.SECONDS)
+                .followRedirects(true)
+                .followSslRedirects(true)
                 .build()
             val request = Request.Builder().url(url)
-                .header("User-Agent", "PocketAgent/3.0")
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
                 .get().build()
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
