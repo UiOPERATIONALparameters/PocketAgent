@@ -55,6 +55,7 @@ class LoadSkillTool @Inject constructor(
         "convert-file",
         "data-analysis",
         "file-management",
+        "install-java",
         "build-apk",
         "research-topic",
         "write-script",
