@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>PocketAgent Install</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { font-family: -apple-system, system-ui, sans-serif; background: #FAFAF7; color: #1A1A1A; padding: 24px 16px; min-height: 100vh; }
+  .wrap { max-width: 600px; margin: 0 auto; }
+  h1 { font-size: 24px; font-weight: 600; margin-bottom: 8px; }
+  .sub { color: #525252; font-size: 15px; margin-bottom: 24px; line-height: 1.5; }
+  .step { background: #fff; border: 1px solid #E5E5E0; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .step-num { font-size: 12px; font-weight: 600; color: #8A8A8A; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .step-title { font-size: 16px; font-weight: 500; margin-bottom: 8px; }
+  .step-body { font-size: 14px; color: #525252; line-height: 1.5; }
+  .cmd { background: #1A1A1A; color: #FAFAF7; font-family: monospace; font-size: 13px; padding: 12px 14px; border-radius: 8px; margin: 12px 0; word-break: break-all; position: relative; }
+  .copy-btn { display: block; width: 100%; padding: 14px; background: #1A1A1A; color: #FAFAF7; border: none; border-radius: 10px; font-size: 15px; font-weight: 500; cursor: pointer; margin-top: 12px; }
+  .copy-btn:active { background: #000; }
+  .copy-btn.copied { background: #4A7C5C; }
+  .link { color: #1A1A1A; text-decoration: underline; }
+  .qr-wrap { text-align: center; margin: 16px 0; }
+  .qr-wrap img { width: 200px; height: 200px; }
+  .hint { font-size: 13px; color: #8A8A8A; margin-top: 8px; text-align: center; }
+  .badge { display: inline-block; background: #F2F2EE; color: #525252; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-family: monospace; margin-left: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>PocketAgent v6 Install</h1>
+  <p class="sub">Your AI agent with a real Linux computer on your phone. Two-minute setup.</p>
+
+  <div class="step">
+    <div class="step-num">Step 1 · 1 min</div>
+    <div class="step-title">Install Termux</div>
+    <div class="step-body">
+      Open <a class="link" href="https://f-droid.org/en/packages/com.termux/">F-Droid → Termux</a> on your phone and tap Install.
+      <br><br>
+      Don't use the Play Store version — it's deprecated and won't work.
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">Step 2 · 30 sec</div>
+    <div class="step-title">Run the installer in Termux</div>
+    <div class="step-body">
+      Open Termux, then tap the button below to copy the command. Paste it into Termux (long-press anywhere in Termux → Paste) and press Enter.
+    </div>
+    <div class="cmd" id="cmd">curl -sL https://tinyurl.com/266a3atb | bash</div>
+    <button class="copy-btn" id="copyBtn" onclick="copyCmd()">Tap to copy command</button>
+  </div>
+
+  <div class="step">
+    <div class="step-num">Step 2 alt</div>
+    <div class="step-title">Or scan this QR code in Termux</div>
+    <div class="step-body">
+      Some keyboards can scan QR codes directly. Or use any QR scanner app to get the command.
+    </div>
+    <div class="qr-wrap">
+      <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=curl%20-sL%20https%3A%2F%2Ftinyurl.com%2F266a3atb%20%7C%20bash" alt="QR code with install command">
+    </div>
+    <div class="hint">QR encodes the full install command</div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">Step 3</div>
+    <div class="step-title">Copy the token</div>
+    <div class="step-body">
+      The installer prints a token at the end (looks like <span class="badge">eZhDtZXAlfskmRDi...</span>).
+      Copy it — you'll paste it into the PocketAgent app.
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">Step 4</div>
+    <div class="step-title">Install PocketAgent APK</div>
+    <div class="step-body">
+      Download the latest APK from <a class="link" href="https://github.com/UiOPERATIONALparameters/PocketAgent/releases/latest">GitHub Releases</a>, install it, open it, go to Settings → Termux → paste the token → Save → Reconnect.
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">Done</div>
+    <div class="step-title">Start chatting</div>
+    <div class="step-body">
+      The AI now has full access to your Termux. Ask it anything — build a website, install python, write a script, anything you can do in Termux.
+    </div>
+  </div>
+</div>
+
+<script>
+function copyCmd() {
+  const cmd = document.getElementById('cmd').innerText;
+  const btn = document.getElementById('copyBtn');
+  navigator.clipboard.writeText(cmd).then(() => {
+    btn.innerText = '✓ Copied — paste in Termux now';
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.innerText = 'Tap to copy command';
+      btn.classList.remove('copied');
+    }, 3000);
+  }).catch(() => {
+    // Fallback for older browsers
+    const ta = document.createElement('textarea');
+    ta.value = cmd;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); btn.innerText = '✓ Copied — paste in Termux now'; btn.classList.add('copied'); } catch (e) {}
+    document.body.removeChild(ta);
+  });
+}
+</script>
+</body>
+</html>
