@@ -51,6 +51,10 @@ class LoadSkillTool @Inject constructor(
     /** List of available skills (for the system prompt). */
     fun availableSkills(): List<String> = listOf(
         "build-website",
+        "summarize-document",
+        "convert-file",
+        "data-analysis",
+        "file-management",
         "build-apk",
         "research-topic",
         "write-script",

@@ -507,8 +507,8 @@ class NativeEnvironmentManager @Inject constructor(
             Dir::Bin::apt-cache "${usrDir.absolutePath}/bin/apt-cache";
             DPkg::Options { "--root=${usrDir.absolutePath}"; "--force-not-root"; "--force-confdef"; "--force-confold"; "--admindir=${usrDir.absolutePath}/var/lib/dpkg"; };
             APT::Architecture "$arch";
-            Acquire::AllowInsecureRepositories "true";
-            Acquire::https::Verify-Peer "false";
+            Acquire::Languages "none";
+            APT::Install-Recommends "0";
             APT::Get::AllowUnauthenticated "true";
         """.trimIndent())
 
@@ -562,8 +562,8 @@ class NativeEnvironmentManager @Inject constructor(
             force-not-root
             force-confdef
             force-confold
-            --admindir=${usrDir.absolutePath}/var/lib/dpkg
-            --root=${usrDir.absolutePath}
+            force-architecture
+            force-depends
         """.trimIndent())
     }
 

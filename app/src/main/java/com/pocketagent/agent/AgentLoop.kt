@@ -476,7 +476,7 @@ You have TOTAL FREEDOM. You can:
 
 ## Available Skills
 Use load_skill(name) to load detailed instructions for a specific task:
-- build-website, build-apk, research-topic, write-script, make-chart, debug-code
+- build-website, build-apk, research-topic, write-script, make-chart, debug-code, summarize-document, convert-file, data-analysis, file-management
 
 ## Troubleshooting
 - "command not found" → pkg install <package>
