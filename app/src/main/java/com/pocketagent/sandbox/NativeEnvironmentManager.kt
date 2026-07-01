@@ -496,29 +496,24 @@ exec /data/data/com.termux/files/usr/bin/env "$@"
     }
 
     /**
-     * v4.7: Pre-install essential packages using dpkg-deb --extract to bypass seccomp.
-     * Package postinst/preinst scripts trigger signal 31 (SIGSYS) on Android 14+.
-     * We download .deb files, extract them manually, and copy files to the right paths.
+     * v5.0: Just run apt-get update to download the package index.
+     *
+     * The v4.7-v4.9 preInstallEssentials approach was fundamentally broken:
+     *   - dpkg-deb --extract only extracts files, doesn't resolve dependencies
+     *   - Fake dpkg status entries (version 1.0-1) conflicted with real packages
+     *   - Missing shared libraries (libLLVM, libcares, libexpat) broke binaries
+     *   - Duplicate entries corrupted dpkg database
+     *
+     * The v4.8 seccomp fix (unset LD_PRELOAD in dpkg/apt wrappers) makes
+     * apt install work properly. So we just need apt-get update — the agent
+     * can install packages on demand with 'pkg install python nodejs git'.
+     *
+     * This is simpler, more reliable, and avoids ALL corruption issues.
      */
     private suspend fun preInstallEssentials(onProgress: (String, Long, Long) -> Unit) {
         val prefix = usrDir.absolutePath
-        val tmpDir = File(context.cacheDir, "preinstall")
-        tmpDir.mkdirs()
 
-        val packages = listOf(
-            "python" to "python",
-            "python-pip" to "python-pip",
-            "nodejs" to "nodejs",
-            "git" to "git",
-            "wget" to "wget",
-            "coreutils" to "coreutils",
-            "grep" to "grep",
-            "tar" to "tar",
-            "make" to "make",
-            "clang" to "clang"
-        )
-
-        // First: apt-get update to download package index
+        // Just run apt-get update to download the package index
         onProgress("Updating package index...", -1, -1)
         try {
             val pb = ProcessBuilder("${binDir.absolutePath}/apt-get", "update")
@@ -534,99 +529,13 @@ exec /data/data/com.termux/files/usr/bin/env "$@"
                 put("TMPDIR", workspace.tmpDir.absolutePath)
                 put("HOME", workspace.homeDir.absolutePath)
             }
+            // v5.0: Don't set LD_PRELOAD — the wrapper already unsets it
             val proc = pb.start()
             proc.waitFor(120, java.util.concurrent.TimeUnit.SECONDS)
             proc.destroyForcibly()
         } catch (_: Exception) {}
 
-        // For each package: download .deb, extract, copy
-        for ((pkgName, _) in packages) {
-            onProgress("Installing $pkgName...", -1, -1)
-            try {
-                // Download the .deb file
-                val debFile = File(tmpDir, "$pkgName.deb")
-                val downloadPb = ProcessBuilder(
-                    "${binDir.absolutePath}/apt-get", "download", pkgName
-                ).directory(tmpDir).redirectErrorStream(true)
-                downloadPb.environment().apply {
-                    put("PREFIX", prefix)
-                    put("PATH", "${binDir.absolutePath}:/system/bin:/system/xbin")
-                    put("LD_LIBRARY_PATH", libDir.absolutePath)
-                    put("APT_CONFIG", "${etcDir.absolutePath}/apt/apt.conf")
-                    put("HOME", workspace.homeDir.absolutePath)
-                }
-                val dlProc = downloadPb.start()
-                dlProc.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)
-                dlProc.destroyForcibly()
-
-                // Find the downloaded .deb
-                val downloadedDeb = tmpDir.listFiles { f -> f.name.endsWith(".deb") }?.firstOrNull()
-                if (downloadedDeb == null || !downloadedDeb.exists()) continue
-
-                // Extract with dpkg-deb --extract (bypasses postinst scripts)
-                val extractDir = File(tmpDir, "extract_$pkgName")
-                extractDir.mkdirs()
-                val extractPb = ProcessBuilder(
-                    "${binDir.absolutePath}/dpkg-deb", "--extract",
-                    downloadedDeb.absolutePath, extractDir.absolutePath
-                ).redirectErrorStream(true)
-                extractPb.environment().apply {
-                    put("PATH", "${binDir.absolutePath}:/system/bin:/system/xbin")
-                    put("LD_LIBRARY_PATH", libDir.absolutePath)
-                }
-                val extProc = extractPb.start()
-                extProc.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
-                extProc.destroyForcibly()
-
-                // Copy extracted files to usr/
-                // v4.9 FIX: Handle BOTH path formats — .deb files can contain either:
-                //   data/data/com.termux/files/usr/... (full Termux path)
-                //   OR just usr/... (relative path, if --instdir is used)
-                val srcPrefix1 = File(extractDir, "data/data/com.termux/files/usr")
-                val srcPrefix2 = File(extractDir, "data/user/0/com.termux/files/usr")
-                val srcPrefix3 = File(extractDir, "usr")  // relative format
-                val srcPrefix = when {
-                    srcPrefix1.exists() -> srcPrefix1
-                    srcPrefix2.exists() -> srcPrefix2
-                    srcPrefix3.exists() -> srcPrefix3
-                    else -> extractDir  // files are directly in extract dir
-                }
-
-                srcPrefix.walkTopDown().forEach { srcFile ->
-                    if (srcFile.isFile) {
-                        val relPath = srcPrefix.toPath().relativize(srcFile.toPath()).toString()
-                        // v4.9: Guard against doubled paths — if relPath already starts with
-                        // data/data/com.termux/files/usr/, strip it
-                        val cleanRelPath = if (relPath.startsWith("data/data/com.termux/files/usr/")) {
-                            relPath.removePrefix("data/data/com.termux/files/usr/")
-                        } else if (relPath.startsWith("data/user/0/com.termux/files/usr/")) {
-                            relPath.removePrefix("data/user/0/com.termux/files/usr/")
-                        } else {
-                            relPath
-                        }
-                        val destFile = File(usrDir, cleanRelPath)
-                        destFile.parentFile?.mkdirs()
-                        try {
-                            srcFile.copyTo(destFile, overwrite = true)
-                            if (cleanRelPath.startsWith("bin/") || cleanRelPath.contains("/bin/") ||
-                                cleanRelPath.contains("/libexec/") || cleanRelPath.endsWith(".so")) {
-                                destFile.setExecutable(true, true)
-                            }
-                            destFile.setReadable(true, true)
-                        } catch (_: Exception) {}
-                    }
-                }
-
-                // Also create .so symlinks for any new libraries
-                createSoSymlinks()
-
-                // Clean up
-                downloadedDeb.delete()
-                extractDir.deleteRecursively()
-            } catch (_: Exception) {}
-        }
-
-        // Create python3 → python symlink
+        // Create python3 → python symlink (in case python is installed later)
         val pythonBin = File(binDir, "python")
         val python3Bin = File(binDir, "python3")
         if (pythonBin.exists() && !python3Bin.exists()) {
@@ -635,26 +544,6 @@ exec /data/data/com.termux/files/usr/bin/env "$@"
                 python3Bin.setExecutable(true, true)
             } catch (_: Exception) {}
         }
-
-        // Clean up temp dir
-        tmpDir.deleteRecursively()
-
-        // Update dpkg status to mark packages as installed
-        try {
-            val dpkgStatus = File(usrDir, "var/lib/dpkg/status")
-            val currentStatus = if (dpkgStatus.exists()) dpkgStatus.readText() else ""
-            val newEntries = packages.joinToString("\n\n") { (name, _) ->
-                """Package: $name
-Status: install ok installed
-Priority: optional
-Section: pre-installed
-Maintainer: PocketAgent <noreply@pocketagent>
-Architecture: aarch64
-Version: 1.0-1
-Description: Pre-installed by PocketAgent"""
-            }
-            dpkgStatus.writeText(currentStatus + "\n\n" + newEntries + "\n")
-        } catch (_: Exception) {}
     }
 
     /**
