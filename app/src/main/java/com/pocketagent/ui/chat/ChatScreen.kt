@@ -1151,7 +1151,17 @@ private fun ToolGroupCard(messages: List<ChatMessageUi>) {
             if (expanded) {
                 Spacer(Modifier.height(6.dp))
                 messages.forEach { msg ->
-                    ToolCallCard(toolName = msg.toolName ?: "tool", arguments = msg.toolArguments, result = msg.toolResult, display = msg.toolDisplay)
+                    // v4.9: Render todo tool results as TodoListCard inside expanded groups too
+                    if (msg.toolName == "todo" && msg.toolResult != null) {
+                        val todoItems = parseTodoResult(msg.toolResult)
+                        if (todoItems.isNotEmpty()) {
+                            TodoListCard(todos = todoItems)
+                        } else {
+                            ToolCallCard(toolName = msg.toolName ?: "tool", arguments = msg.toolArguments, result = msg.toolResult, display = msg.toolDisplay)
+                        }
+                    } else {
+                        ToolCallCard(toolName = msg.toolName ?: "tool", arguments = msg.toolArguments, result = msg.toolResult, display = msg.toolDisplay)
+                    }
                     Spacer(Modifier.height(4.dp))
                 }
             }

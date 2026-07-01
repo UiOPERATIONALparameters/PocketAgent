@@ -507,11 +507,15 @@ exec /data/data/com.termux/files/usr/bin/env "$@"
 
         val packages = listOf(
             "python" to "python",
+            "python-pip" to "python-pip",
+            "nodejs" to "nodejs",
             "git" to "git",
             "wget" to "wget",
             "coreutils" to "coreutils",
             "grep" to "grep",
-            "tar" to "tar"
+            "tar" to "tar",
+            "make" to "make",
+            "clang" to "clang"
         )
 
         // First: apt-get update to download package index
@@ -575,23 +579,46 @@ exec /data/data/com.termux/files/usr/bin/env "$@"
                 extProc.destroyForcibly()
 
                 // Copy extracted files to usr/
-                val srcPrefix = File(extractDir, "data/data/com.termux/files/usr")
-                if (srcPrefix.exists()) {
-                    srcPrefix.walkTopDown().forEach { srcFile ->
-                        if (srcFile.isFile) {
-                            val relPath = srcPrefix.toPath().relativize(srcFile.toPath()).toString()
-                            val destFile = File(usrDir, relPath)
-                            destFile.parentFile?.mkdirs()
-                            try {
-                                srcFile.copyTo(destFile, overwrite = true)
-                                if (relPath.startsWith("bin/") || relPath.contains("/bin/")) {
-                                    destFile.setExecutable(true, true)
-                                }
-                                destFile.setReadable(true, true)
-                            } catch (_: Exception) {}
+                // v4.9 FIX: Handle BOTH path formats — .deb files can contain either:
+                //   data/data/com.termux/files/usr/... (full Termux path)
+                //   OR just usr/... (relative path, if --instdir is used)
+                val srcPrefix1 = File(extractDir, "data/data/com.termux/files/usr")
+                val srcPrefix2 = File(extractDir, "data/user/0/com.termux/files/usr")
+                val srcPrefix3 = File(extractDir, "usr")  // relative format
+                val srcPrefix = when {
+                    srcPrefix1.exists() -> srcPrefix1
+                    srcPrefix2.exists() -> srcPrefix2
+                    srcPrefix3.exists() -> srcPrefix3
+                    else -> extractDir  // files are directly in extract dir
+                }
+
+                srcPrefix.walkTopDown().forEach { srcFile ->
+                    if (srcFile.isFile) {
+                        val relPath = srcPrefix.toPath().relativize(srcFile.toPath()).toString()
+                        // v4.9: Guard against doubled paths — if relPath already starts with
+                        // data/data/com.termux/files/usr/, strip it
+                        val cleanRelPath = if (relPath.startsWith("data/data/com.termux/files/usr/")) {
+                            relPath.removePrefix("data/data/com.termux/files/usr/")
+                        } else if (relPath.startsWith("data/user/0/com.termux/files/usr/")) {
+                            relPath.removePrefix("data/user/0/com.termux/files/usr/")
+                        } else {
+                            relPath
                         }
+                        val destFile = File(usrDir, cleanRelPath)
+                        destFile.parentFile?.mkdirs()
+                        try {
+                            srcFile.copyTo(destFile, overwrite = true)
+                            if (cleanRelPath.startsWith("bin/") || cleanRelPath.contains("/bin/") ||
+                                cleanRelPath.contains("/libexec/") || cleanRelPath.endsWith(".so")) {
+                                destFile.setExecutable(true, true)
+                            }
+                            destFile.setReadable(true, true)
+                        } catch (_: Exception) {}
                     }
                 }
+
+                // Also create .so symlinks for any new libraries
+                createSoSymlinks()
 
                 // Clean up
                 downloadedDeb.delete()
