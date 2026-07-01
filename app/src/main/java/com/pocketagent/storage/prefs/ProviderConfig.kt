@@ -34,7 +34,8 @@ data class AppSettings(
     val bashCommandTimeoutSec: Int = 30,
     val systemPrompt: String = "",          // empty = use default from AgentLoop
     val maxToolIterations: Int = 50,        // H2: max tool calls per turn (5-100); was 30, too low for build tasks
-    val tokenSaveMode: Boolean = false      // H3: if true, truncate results + skip reasoning (still keeps tools)
+    val tokenSaveMode: Boolean = false,     // H3: if true, truncate results + skip reasoning
+    val disabledSkills: String = ""            // v4.3: comma-separated list of disabled skill names
 ) {
     enum class ThemeMode { SYSTEM, LIGHT, DARK }
 }

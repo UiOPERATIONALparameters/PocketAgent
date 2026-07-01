@@ -484,11 +484,11 @@ class NativeEnvironmentManager @Inject constructor(
         if (!aptDir.exists()) aptDir.mkdirs()
 
         val arch = when (detectAbi()) {
-            "aarch64" -> "arm64"
-            "arm" -> "armhf"
-            "x86_64" -> "amd64"
-            "i686" -> "i386"
-            else -> "arm64"
+            "aarch64" -> "aarch64"
+            "arm" -> "arm"
+            "x86_64" -> "x86_64"
+            "i686" -> "i686"
+            else -> "aarch64"
         }
 
         // Main apt.conf — points ALL paths to our prefix
@@ -501,6 +501,7 @@ class NativeEnvironmentManager @Inject constructor(
             Dir::Cache "${usrDir.absolutePath}/var/cache/apt";
             Dir::Cache::archives "${usrDir.absolutePath}/var/cache/apt/archives";
             Dir::Etc "${usrDir.absolutePath}/etc/apt";
+            Dir::Log "/data/data/com.termux/files/usr/var/log/apt";
             Dir::Bin "${usrDir.absolutePath}/bin";
             Dir::Bin::dpkg "${usrDir.absolutePath}/bin/dpkg";
             Dir::Bin::apt-get "${usrDir.absolutePath}/bin/apt-get";
@@ -564,6 +565,8 @@ class NativeEnvironmentManager @Inject constructor(
             force-confold
             force-architecture
             force-depends
+            admindir /data/data/com.termux/files/usr/var/lib/dpkg
+            root /data/data/com.termux/files/usr
         """.trimIndent())
     }
 

@@ -25,7 +25,8 @@ import javax.inject.Singleton
  */
 @Singleton
 class LoadSkillTool @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val settings: com.pocketagent.storage.prefs.SettingsRepository
 ) : AgentTool {
 
     override val name = "load_skill"
@@ -55,6 +56,7 @@ class LoadSkillTool @Inject constructor(
         "convert-file",
         "data-analysis",
         "file-management",
+        "install-java",
         "build-apk",
         "research-topic",
         "write-script",
@@ -67,6 +69,13 @@ class LoadSkillTool @Inject constructor(
             ?: return ToolResult.Error("Arguments must be a JSON object")
         val skillName = obj["name"]?.jsonPrimitive?.contentOrNull
             ?: return ToolResult.Error("Missing 'name' parameter")
+
+        // v4.3: Check if skill is disabled by user (saves tokens)
+        val disabledSkills = settings.settings.value.disabledSkills
+            .split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        if (skillName in disabledSkills) {
+            return ToolResult.Error("Skill '$skillName' is disabled. Enable it in Settings.")
+        }
 
         return withContext(Dispatchers.IO) {
             try {
