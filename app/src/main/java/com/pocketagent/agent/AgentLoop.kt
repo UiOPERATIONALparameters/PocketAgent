@@ -359,7 +359,7 @@ class AgentLoop @Inject constructor(
             val linuxInstalled = nativeEnv.isInstalled()
             if (linuxInstalled) {
                 sb.append("Linux environment: INSTALLED (Termux native — bash, apt, pkg)\n")
-                sb.append("Available: bash, coreutils, apt, pkg, curl. Run "pkg install python nodejs git wget clang" on first use to install essentials.
+                sb.append("Available: bash, coreutils, apt, pkg, curl. Run pkg install python nodejs git wget clang on first use.
             } else {
                 sb.append("Linux environment: NOT installed (system shell only — basic coreutils)\n")
                 sb.append("To get python3/node/git/gcc, the user must install Linux from Settings → Linux Environment.\n")
