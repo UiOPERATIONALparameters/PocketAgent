@@ -17,7 +17,7 @@
 # After install, run: pocketagent-daemon
 # The app will connect automatically (same device, localhost:8765).
 
-set -e
+# set -e  # removed for verbose error reporting
 
 PA_DIR="$HOME/.pocketagent"
 DAEMON_URL="https://raw.githubusercontent.com/UiOPERATIONALparameters/PocketAgent/v6-termux-bridge/termux-daemon/daemon.py"

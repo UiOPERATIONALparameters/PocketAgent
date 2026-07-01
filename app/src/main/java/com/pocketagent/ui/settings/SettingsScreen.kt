@@ -532,7 +532,7 @@ fun SettingsScreen(
                                 val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
                                 val context = androidx.compose.ui.platform.LocalContext.current
                                 var copied by remember { mutableStateOf(false) }
-                                val installCmd = "curl -sL https://tinyurl.com/266a3atb | bash"
+                                val installCmd = "curl -sL https://tinyurl.com/286scpfd | bash"
                                 Surface(
                                     color = ext.surfaceSubtle,
                                     shape = RoundedCornerShape(8.dp),
