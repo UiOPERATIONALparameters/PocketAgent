@@ -62,9 +62,33 @@ class CloudBridge @Inject constructor(
         val url = baseUrl ?: return@withContextSafe Result.failure(CloudException("No cloud URL configured"))
         val req = buildRequest("$url/health").get().build()
         val resp = httpClient.newCall(req).execute()
-        if (!resp.isSuccessful) return@withContextSafe Result.failure(CloudException("Health check failed: HTTP ${resp.code}"))
         val body = resp.body?.string() ?: throw CloudException("Empty response")
-        Result.success(json.decodeFromString(HealthResponse.serializer(), body))
+        if (!resp.isSuccessful) return@withContextSafe Result.failure(CloudException("Health check failed: HTTP ${resp.code}"))
+        // CRITICAL: Detect HTML responses (codespace port is PRIVATE → GitHub returns login HTML)
+        if (body.trimStart().startsWith("<") || body.contains("<!doctype", ignoreCase = true)) {
+            return@withContextSafe Result.failure(CloudException(
+                "Got HTML instead of JSON — the codespace port 8765 is PRIVATE. " +
+                "Fix: open your codespace in a browser → Ports tab (bottom panel) → " +
+                "right-click port 8765 → Port visibility → Public. " +
+                "Then tap Refresh here."
+            ))
+        }
+        // Detect GitHub login redirects (another sign of private port)
+        if (body.contains("github.com/login", ignoreCase = true) || body.contains("Sign in to GitHub", ignoreCase = true)) {
+            return@withContextSafe Result.failure(CloudException(
+                "Got GitHub login page — the codespace port 8765 is PRIVATE. " +
+                "Fix: open your codespace → Ports tab → right-click 8765 → Public."
+            ))
+        }
+        Result.success(try {
+            json.decodeFromString(HealthResponse.serializer(), body)
+        } catch (e: Exception) {
+            // Last-resort catch — body is neither JSON nor detectable HTML
+            throw CloudException(
+                "Could not parse response. Got: ${body.take(200)}. " +
+                "The codespace URL may be wrong, or the daemon isn't running."
+            )
+        })
     }
 
     suspend fun refreshState() {
